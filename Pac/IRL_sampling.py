@@ -116,7 +116,7 @@ class IRL_ImgResampler(IO.ComfyNode):
         주어진 텍스트 요소들을 조합하여 글로벌 프롬프트 문자열 생성.
         'basic' 값이나 None/빈 문자열은 제외.
         """
-        parts = ["preserve original composition", "enhance details"]
+        parts = []
 
         def add_part(value, skip_basic=False):
             if value and isinstance(value, str):
@@ -160,7 +160,7 @@ class IRL_ImgResampler(IO.ComfyNode):
                 IO.Combo.Input("scheduler", options=["normal", "karras"], default="normal", tooltip="스케줄러 방식"),
                 IO.Combo.Input("quality", options=["basic", "high_resolution", "masterpiece"],
                                default="basic", tooltip="이미지 퀄리티 프리셋-긍정용", optional=True),
-                IO.String.Input("pos_text", multiline=True, tooltip="긍정 프롬프트 텍스트. preserve original composition, enhance details은 이미 입력되어 있습니다.", optional=True),
+                IO.String.Input("pos_text", multiline=True, tooltip="긍정 프롬프트 텍스트", optional=True),
                 IO.Combo.Input("bad_qual", options=["bad_quality", "low_resolution", "basic"],
                                default="basic", tooltip="이미지 퀄리티 프리셋-부정용", optional=True),
                 IO.String.Input("neg_text", multiline=True, tooltip="부정 프롬프트 텍스트. 키워드를 너무 많이 넣으시면 안됩니다.", optional=True),
