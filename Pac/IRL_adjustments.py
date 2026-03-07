@@ -3,21 +3,25 @@
 # (LOCALE-based multilingual description support included)
 # -------------------------------
 
+import os
 import numpy as np
 import torch
+from torch import nn
+import torch.nn.functional as F
 import cv2
 from PIL import Image
 from skimage import exposure
+import random
+
 
 # ComfyUI 최신 API
+import comfy
 from comfy_api.latest import IO, UI
 
-
 # -------------------------------
-# 공통 유틸 함수
 def to_tensor_output(canvas: Image.Image):
     arr = np.array(canvas).astype(np.float32) / 255.0
-    arr = arr[None, ...]  # batch 차원 추가
+    arr = arr[None, ...]
     return torch.from_numpy(arr)
 
 def to_numpy_image(image):
@@ -35,7 +39,20 @@ def to_numpy_image(image):
     else:
         raise TypeError("Unsupported image type")
 
+def apply_color_str(arr, color, strength):
+    strength = strength[..., None]
+    blended = (1 - strength) * arr + strength * color[None, None, :]
+    return blended
 
+
+def normalize_intensity(gray, black_point, white_point, gradient_str=0.0):
+
+    t = np.clip((gray - black_point) / (white_point - black_point), 0, 1)
+
+    # sigmoid로 경계 부드럽게
+    if gradient_str > 0:
+        t = 1 / (1 + np.exp(-(t - 0.5) * 10 * gradient_str))
+    return t
 # -------------------------------
 # Node definitions
 # -------------------------------
@@ -134,13 +151,10 @@ class IRL_LevelsAdjustment(IO.ComfyNode):
     def execute(cls, image, in_brightness=1.00, gamma=1.00, out_brightness=1.00) -> IO.NodeOutput:
         arr = to_numpy_image(image).astype(np.float32)
 
-        # 입력 밝기 조정
         arr = arr * in_brightness
 
-        # 감마 보정
         arr = exposure.adjust_gamma(arr, gamma)
 
-        # 출력 밝기 조정
         arr = arr * out_brightness
 
         arr = np.clip(arr, 0, 255).astype(np.uint8)
@@ -157,29 +171,113 @@ class IRL_GradientMap(IO.ComfyNode):
             node_id="IRL_GradientMap",
             display_name="그라디언트 맵",
             category="이미지 리파이너/이미지조정",
-            description="그레이스케일 값을 두 색상 사이의 그라디언트로 매핑합니다.",
+            description="이미지 값을 두 색상 사이의 그라디언트로 매핑합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="그레이스케일 값을 매핑할 대상 이미지"),
-                IO.Float.Input("dark_strength", default=0.0, min=0.0, max=1.0, step=0.05,
-                               tooltip="어두운 영역 강조 강도"),
-                IO.Float.Input("light_strength", default=1.0, min=0.0, max=1.0, step=0.05,
-                               tooltip="밝은 영역 강조 강도"),
+                IO.Image.Input("image", tooltip="팔레트 강조 및 그라디언트 매핑을 적용할 원본 이미지"),
+                IO.Combo.Input("red", options=["off", "on"], default="off", tooltip="적색 팔레트 설정"),
+                IO.Combo.Input("magenta", options=["off", "on"], default="off", tooltip="자홍색 팔레트 설정"),
+                IO.Combo.Input("yellow", options=["off", "on"], default="off", tooltip="노란색 팔레트 설정"),
+                IO.Combo.Input("green", options=["off", "on"], default="off", tooltip="녹색 팔레트 설정"),
+                IO.Combo.Input("blue", options=["off", "on"], default="off", tooltip="청색 팔레트 설정"),
+                IO.Combo.Input("cyan", options=["off", "on"], default="off", tooltip="청록색 팔레트 설정"),
+                IO.Combo.Input("black", options=["off", "on"], default="off", tooltip="흑색 팔레트 설정"),
+                IO.Int.Input("color_str", default=0, min=0, max=255, step=1,
+                               tooltip="팔레트 색상 강조 강도 (값이 클수록 팔레트 색상이 더 강하게 적용됨)"),
+                IO.Combo.Input("base_suf", options=["off", "on"], default="off", tooltip="원본 색상 유지 여부"),
+                IO.Combo.Input("blend_mode", options=["off", "soft_blend", "blend", "hard_blend"], default="off", tooltip="다중 활성 팔레트 색상 블렌딩 모드"),
+                IO.Float.Input("gradient_str", default=0.0, min=0.0, max=1.0, step=0.01, tooltip="밝기 기반 그라디언트 조정"),
+                IO.Combo.Input("auto_gradient", options=["off", "on"], default="off", tooltip="다중 활성 팔레트를 자동 보간하여 그라디언트 생성")
             ],
             outputs=[
-                IO.Image.Output("image", tooltip="그레이스케일을 지정된 색상 그라디언트로 매핑한 결과 이미지")
+                IO.Image.Output("image", tooltip="이미지를 지정된 색상 그라디언트로 매핑한 결과 이미지")
             ]
         )
 
+
     @classmethod
-    def execute(cls, image, color_dark="#000000", color_light="#FFFFFF") -> IO.NodeOutput:
+    def execute(cls, image, red="off", magenta="off", yellow="off", green="off", blue="off", cyan="off", black="off",
+                color_str=0, base_suf="off", gradient_str=0.0, blend_mode="off", auto_gradient="off") -> IO.NodeOutput:
+
         arr = to_numpy_image(image).astype(np.float32)
-        gray = np.mean(arr, axis=2) / 255.0
+        if arr.max() <= 1.0:
+            arr *= 255.0
 
-        c1 = np.array([0, 0, 0], dtype=np.float32)
-        c2 = np.array([255, 255, 255], dtype=np.float32)
+        active_colors = []
+        if red == "on": active_colors.append(np.array([255, 0, 0], dtype=np.float32))
+        if magenta == "on": active_colors.append(np.array([255, 0, 255], dtype=np.float32))
+        if yellow == "on": active_colors.append(np.array([255, 255, 0], dtype=np.float32))
+        if green == "on": active_colors.append(np.array([0, 255, 0], dtype=np.float32))
+        if blue == "on": active_colors.append(np.array([0, 0, 255], dtype=np.float32))
+        if cyan == "on": active_colors.append(np.array([0, 255, 255], dtype=np.float32))
+        if black == "on": active_colors.append(np.array([0, 0, 0], dtype=np.float32))
 
-        mapped = (c1 * (1 - gray[..., None]) + c2 * gray[..., None]).astype(np.uint8)
+        gray = cv2.cvtColor(arr.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
+        t = normalize_intensity(gray, 0, 255, gradient_str)  # (H,W)
+        t = t[..., None]
+
+        w_dark = color_str / 255.0
+
+        if base_suf == "on":
+            w_light = 1.0
+        else:
+            w_light = 0.0
+
+        if len(active_colors) == 0:
+            if base_suf == "on":
+                mapped = arr.copy()
+            else:
+                mapped = np.stack([gray]*3, axis=-1)
+
+        else:
+            if auto_gradient == "on" and len(active_colors) >= 2:
+                idx = (t * (len(active_colors)-1)).astype(int).squeeze(-1)
+                frac = (t * (len(active_colors)-1)).squeeze(-1) - idx
+                colorA = np.array(active_colors)[idx]
+                colorB = np.array(active_colors)[np.clip(idx+1, 0, len(active_colors)-1)]
+                frac = frac[..., None]
+                palette_mix = (1-frac) * colorA + frac * colorB
+                mapped = (w_light * arr) + (w_dark * palette_mix)
+
+            elif len(active_colors) > 1:
+                if blend_mode == "off":
+                    mapped = arr.copy()
+                    for c in active_colors:
+                        mapped = (1 - t) * mapped + t * c[None, None, :]
+                else:
+                    if blend_mode == "soft_blend":
+                        threshold = 35
+                    elif blend_mode == "blend":
+                        threshold = 40
+                    elif blend_mode == "hard_blend":
+                        threshold = 50
+                    else:
+                        threshold = 40
+
+                    mapped = np.zeros((*gray.shape, 3), dtype=np.float32)
+                    weights_total = np.zeros(gray.shape, dtype=np.float32)
+                    for c in active_colors:
+                        dist = np.linalg.norm(arr - c[None, None, :], axis=-1)
+                        w = np.exp(-(dist ** 2) / (2 * (threshold ** 2)))
+                        mapped += w[..., None] * c
+                        weights_total += w
+                    mapped /= np.maximum(weights_total[..., None], 1e-6)
+
+                mapped = (w_light * arr) + (w_dark * mapped)
+
+            else:
+                c = active_colors[0]
+                mapped = (w_light * arr) + (w_dark * c[None, None, :])
+
+        mapped = np.clip(mapped, 0, 255).astype(np.uint8)
         return IO.NodeOutput(to_tensor_output(Image.fromarray(mapped)))
+
+
+
+
+
+
+
+
 
 # -------------------------------
 
@@ -217,7 +315,6 @@ class IRL_ShadowsHighlights(IO.ComfyNode):
         shadow_mask = (L < 0.5).astype(np.float32)
         highlight_mask = (L >= 0.5).astype(np.float32)
 
-        # 조정
         L = L + shadow_mask * shadow_amount * (0.5 - L)
         L = L - highlight_mask * highlight_amount * (L - 0.5)
 
@@ -230,10 +327,8 @@ class IRL_ShadowsHighlights(IO.ComfyNode):
         return IO.NodeOutput(to_tensor_output(Image.fromarray(out)))
 
 
-       
 
 # -------------------------------
-# 클래스 매핑
 ADJUSTMENTS_NODE_CLASS_MAPPINGS = {
     "IRL_RGBLevels": IRL_RGBLevels,
     "IRL_BlackWhiteLevels": IRL_BlackWhiteLevels,
@@ -242,7 +337,6 @@ ADJUSTMENTS_NODE_CLASS_MAPPINGS = {
     "IRL_ShadowsHighlights": IRL_ShadowsHighlights,
 }
 
-# 이름 매핑
 ADJUSTMENTS_NODE_DISPLAY_NAME_MAPPINGS = {
     "IRL_RGBLevels": "RGB 레벨",
     "IRL_BlackWhiteLevels": "블랙 & 화이트 레벨",
