@@ -1,8 +1,6 @@
 
 #### Image Refiner Lite — ComfyUI용 독립 이미지 보정·마스크·텍스트 유틸리티 노드팩####
-Image Refiner Lite는 기존 WAS Node Suite의 구조나 코드에 의존하지 않는,
-
-완전히 새롭게 작성된 독립 이미지 처리 플러그인입니다.
+Image Refiner Lite는 독립 이미지 처리 플러그인입니다.
 
 Stable Diffusion 모델, latent기반 기능을 전부 제거하고 ComfyUI Standalone 환경에서
 
@@ -24,75 +22,13 @@ Stable Diffusion 모델, latent기반 기능을 전부 제거하고 ComfyUI Stan
 
 • 불필요한 의존성 제거
 
+####외부 라이선스 관련####
 
-
-이 플러그인은 WAS의 후속작이 아니며, WAS의 코드나 구조를 재사용하지 않습니다.
-
-
-
-####WAS 대비 제거된 노드 (환경 안정성 및 의존성 문제로 인해 비활성화됨)####
-
-
-
-다음 노드들은 외부 모델, 대규모 패키지, 또는 시스템 환경 변경을 요구하기 때문에
-
-Image Refiner Lite에서는 제공하지 않습니다.
-
-• Rembg Remove Background (모델 의존)
-
-• Segment Anything (SAM) (모델 의존)
-
-• CLIP Interrogator
-
-• Face Restore (모델 의존)
-
-• Depth Map
-
-• Image Captioning (모델 의존)
-
-• Image Classification (모델 의존)
-
-• Semantic Segmentation (모델 의존)
-
-• Video Extract / Assemble (모델 의존)
-
-• Audio Load / Waveform (모델 의존)
-
-• Image Load / Save (ComfyUI 기본 노드와 기능 중복)
-
-• Image to Latent Mask — ComfyUI의 latent 구조와 충돌할 가능성이 있어 제외했습니다.
-
-• Image to Noise — ComfyUI 샘플러와 다른 방식으로 noise를 처리하여 과부하가 발생할 수 있어 제외했습니다.
-
-• LatentCompositeMasked — ComfyUI의 latent 합성 방식과 달라 샘플러 동작에 영향을 줄 수 있어 제외했습니다.
-
-• WAS 마스크 노드 전체 (ComfyUI 기본 노드 기능)
-
-• WAS Text Progress 계열 노드 전체 (ComfyUI 기본 텍스트 노드와 기능 중복)
-
-• 수학 및 논리 관련 노드는 대부분 ComfyUI 기본 기능과 중복되기 때문에, Image Refiner Lite에서는 제공하지 않습니다.
-
-• 기타 git 기반 모델 로더 노드들
-
-이 기능이 필요하다면 WAS Suite를 설치해 사용하시면 됩니다.
-
-
-
-###제거된 의존성 패키지 + 제거 사유###
-
-다음 패키지들은 설치 시 torch / torchvision / numpy / pillow
-같은 핵심 패키지를 강제로 업데이트하거나,
-ComfyUI Standalone 환경을 손상시킬 위험이 있어 제외했습니다.
-rembg  : numpy, pillow, onnxruntime 및 146건의 대규모 업데이트를 진행하며 ComfyUI Standalone 환경을 박살내는 가장 큰 원인입니다.
-timm     : torchvision 버전 충돌 및 torch 재설치 위험(설치시 torchvision및 torch의 재설치를 유도하며, 개별로 설치하더라도 처리 중 충돌을 유발할 가능성이 있습니다.)
-fairscale : torch ABI 충돌을 유발할 가능성이 있습니다.
-numba  : 포터블에서는 Numpy 환경을 강제로 바꿉니다.
-cmake   : 관련 빌드 설정 과정에서 파이선 환경을 아작낼 위험이 있습니다.
-ffmpy / ffmpeg    : 외부 바이너리 의존성으로 충돌 가능성
-git+패키지 3~4종 : 대량설치를 유발하기에 임베드 파이선의 버전 데이터 고정이 힘들어지는 원인 중 하나입니다.
-
-*라이트판은 환경 안정성 최우선을 목표로 하므로 위 패키지들은 모두 제거되었습니다.
-
+신규 노드에 comfyui의 샘플러 베이스가 참고된 노드가 있습니다.
+ComfyUI(AGPL-3.0)의 텍스트 프롬프트, 샘플러 및 임베딩 노드를 연결하기 위한 로직들을 
+기반으로 수정된 버전입니다.
+# 원본 프로젝트: https://github.com/comfyanonymous/ComfyUI
+comfyui의 라이선스는 외부 라이선스로서 exterlal licenses에 들어가 있습니다.
 
 
 ###requirements.txt가 비어 있는 이유###
@@ -126,13 +62,10 @@ Installation:
 
 #[Node Usage Manual]#
 
-#변경사항
-최신 버전에선 기동은 해도 의미가 별로 없어서, Utility 노드는 폐기했습니다. 
-
 [Adjustments Nodes]
 
 IRL_RGBLevels
-#변경사항: 슬라이더 통합
+
 - node_id: IRL_RGBLevels
 
 - display_name:RGB 레벨
@@ -164,7 +97,7 @@ IRL_BlackWhiteLevels
 
 
 IRL_LevelsAdjustment 
-#변경사항: 슬라이더 통합
+
 
 - node_id: IRL_LevelsAdjustment
 
@@ -181,7 +114,7 @@ IRL_LevelsAdjustment
 
 
 IRL_GradientMap
-#변경사항: 픽셀 코드 직접입력식을 교체.
+#변경사항:버그수정, 처리형식 변경
 #컬러 코드 직접입력을 고정, 슬라이더로 강도 조절하도록 변경
 
 - node_id: IRL_GradientMap
@@ -190,9 +123,9 @@ IRL_GradientMap
 
 - category: IRL_Adjustments
 
-- 역할: 명도값을 두 색상의 그라디언트로 매핑
+- 역할: 제시된 색상팔레트들의 조합 및 기존이미지와의 오버레이 처리로 다양한 사용법을 추구합니다.
 
-- Inputs: image, color_dark, color_light
+- Inputs: image, 7color palette, color_str, base_suf, blend_mode, gradient옵션 제공
 
 - Outputs: image
 
@@ -209,6 +142,36 @@ IRL_ShadowsHighlights
 - 역할: 그림자/하이라이트 디테일 복원
 
 - Inputs: image, shadow_amount, highlight_amount
+
+- Outputs: image
+
+#신규 노드#
+IRL_ImgResampler
+
+- node_id: IRL_ImgResampler
+
+- display_name:이미지 리샘플러
+
+- category: IRL_Adjustments
+
+- 역할: 이미지에 노이즈를 추가하고 디노이즈 재처리를 통해 품질 향상을 시도합니다. 이미지 인코드, 디코드도 전부 처리합니다.
+
+- Inputs: model, clip, vae, image, noise option, sampler 옵션
+
+- Outputs: image
+
+#신규 노드#
+IRL_ImgDetailer
+
+- node_id: IRL_ImgDetailer
+
+- display_name: 이미지 디테일러
+
+- category: IRL_Adjustments
+
+- 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
+
+- Inputs: image, 샤프닝, 히스토그램 평활화, 유연화, 라인강조 슬라이더
 
 - Outputs: image
 
@@ -533,7 +496,7 @@ IRL_RandomColor
 
 
 IRL_WhiteNoise
-#설명창 오류 수정
+
 - node_id: IRL_WhiteNoise
 
 - display_name:화이트 노이즈
@@ -549,7 +512,7 @@ IRL_WhiteNoise
 
 [Analysis Nodes]
 
-#바이큐빅으로 보간하던걸 폰트로딩으로 변경, 글자크기조정가능.
+#글자크기조정가능.
 
 #윈도우 기본 폰트지만, 만약 폰트가 없을 경우 노드에 포함되어있는 폰트 설치.
 
@@ -678,6 +641,8 @@ IRL_DepthStats
 - Inputs: image, font_size
 	
 - Outputs: stats — 깊이 평균 및 깊이 표준편차 + 텍스트 기반 시각화 이미지
+
+
 
 
 
