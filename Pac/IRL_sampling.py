@@ -153,6 +153,7 @@ class IRL_ImgResampler(IO.ComfyNode):
                                tooltip="노이즈 강도"),
                 IO.Float.Input("denoise", default=0.30, min=0.00, max=1.00, step=0.01,
                                tooltip="디노이즈 처리"),
+                IO.String.Input("seedset", tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 넣은 경우 고정시드로 취급됩니다."),
                 IO.Combo.Input("noise_mode", options=["normal", "Small_spread", "big_spread"], default="normal", tooltip="노이즈 방식"),
                 IO.Int.Input("steps", default=20, min=1, max=100, tooltip="디노이즈 스텝 수"),
                 IO.Float.Input("cfg", default=7.0, min=1.0, max=20.0, step=0.1, tooltip="CFG 스케일"),
@@ -172,7 +173,7 @@ class IRL_ImgResampler(IO.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, clip, vae, image, noise_str=0.00, denoise=0.30, noise_mode="normal", 
+    def execute(cls, model, clip, vae, image, noise_str=0.00, denoise=0.30, seedset=0, noise_mode="normal", 
                 steps=20, cfg=7.0, sampler_name="euler", scheduler="normal", quality="basic",
                 pos_text=None, bad_qual="basic", neg_text=None, seed=0, device_set="cpu") -> IO.NodeOutput:
 
@@ -189,7 +190,7 @@ class IRL_ImgResampler(IO.ComfyNode):
                 device = "cuda"
             else:
                 device = "cpu"  # fallback
-        parsed_seed = parse_seed(seed)
+        parsed_seed = parse_seed(seedset)
 
         if parsed_seed == 0:
             base_seed = random.randint(1, 2**31 - 1)
