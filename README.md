@@ -44,19 +44,9 @@ python -m pip install --no-deps matplotlib
 
 위 패키지들은 라이트판에서 사용하는 안전한 최소 의존성입니다.
 설치는 선택 사항이며, 대부분의 기능은 기본 상태에서도 작동합니다.
-
-권장하진 않지만, 만약 intel 내장 그래픽인 상태로라도 시도해보고 싶은 분은 다음을 시도해보세요.
-90GB 이상이 필요한 방식이라 권장하진 않습니다.
-visual studio 2019/2022/2026 등이 필요(일반 설치툴이 아니라 전문가용 툴이 필요합니다. 용량이 60GB 수준입니다. 사실 대부분의 기능은 cpu처리만 할 경우 파이선으로 대체가 가능합니다. 정말로 권장하진 않습니다.)
-Intel oneAPI Base Toolkit설치(설치파일 용량만 2.5gb이며 기본적으로 지원 모델이 많지 않습니다. 안되는 경우는 cpu를 쓸 수밖에 없습니다. 요구 용량도 14GB 이상이 필요합니다.)
-
-python -m pip install --no-deps numba==0.59.1
-git clone https://github.com/IntelPython/numba-dpex.git
-(버전에 맞춘 whl이 따로 없음. 포크기준으로 버전을 맞춰야 하고, 2년 전이 마지막 업데이트.)
-python -m pip install --no-deps pybind11
-python -m pip install --no-deps dpctl==0.21.1
-
-
+-
+인텔 내장 그래픽 관련 로직은 작동하게 하기 위해선 numpy 버전을 내려야 합니다. 그래서 로직 파기했습니다.
+-
 #[설치 방법]#
 
 
