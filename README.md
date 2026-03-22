@@ -37,14 +37,24 @@ ComfyUI는 확장팩 로딩 시 requirements.txt를 자동 설치합니다.
 Image Refiner Lite판에서는 requirements.txt를 빈 파일로 유지합니다.
 
 대신, 다음의 코드로 최소 의존성 설치법을 남깁니다.
-pip install --no-deps simpleeval
-pip install --no-deps gitpython
-pip install --no-deps pilgram
-pip install --no-deps matplotlib
+python -m pip install --no-deps simpleeval
+python -m pip install --no-deps gitpython
+python -m pip install --no-deps pilgram
+python -m pip install --no-deps matplotlib
 
 위 패키지들은 라이트판에서 사용하는 안전한 최소 의존성입니다.
 설치는 선택 사항이며, 대부분의 기능은 기본 상태에서도 작동합니다.
 
+권장하진 않지만, 만약 intel 내장 그래픽인 상태로라도 시도해보고 싶은 분은 다음을 시도해보세요.
+90GB 이상이 필요한 방식이라 권장하진 않습니다.
+visual studio 2019/2022/2026 등이 필요(일반 설치툴이 아니라 전문가용 툴이 필요합니다. 용량이 60GB 수준입니다. 사실 대부분의 기능은 cpu처리만 할 경우 파이선으로 대체가 가능합니다. 정말로 권장하진 않습니다.)
+Intel oneAPI Base Toolkit설치(설치파일 용량만 2.5gb이며 기본적으로 지원 모델이 많지 않습니다. 안되는 경우는 cpu를 쓸 수밖에 없습니다. 요구 용량도 14GB 이상이 필요합니다.)
+
+python -m pip install --no-deps numba==0.59.1
+git clone https://github.com/IntelPython/numba-dpex.git
+(버전에 맞춘 whl이 따로 없음. 포크기준으로 버전을 맞춰야 하고, 2년 전이 마지막 업데이트.)
+python -m pip install --no-deps pybind11
+python -m pip install --no-deps dpctl==0.21.1
 
 
 #[설치 방법]#
@@ -114,8 +124,8 @@ IRL_LevelsAdjustment
 
 
 IRL_GradientMap
-#변경사항:버그수정, 처리형식 변경
-#컬러 코드 직접입력을 고정, 슬라이더로 강도 조절하도록 변경
+
+#컬러 코드 직접입력을 고정, 슬라이더로 강도 조절
 
 - node_id: IRL_GradientMap
 
@@ -145,7 +155,9 @@ IRL_ShadowsHighlights
 
 - Outputs: image
 
-#신규 노드#
+
+#패치 노드#
+디폴트 값 안정화
 IRL_ImgResampler
 
 - node_id: IRL_ImgResampler
@@ -161,6 +173,55 @@ IRL_ImgResampler
 - Outputs: image
 
 #신규 노드#
+
+디폴트 값 안정화
+IRL_ImgResampler
+
+- node_id: IRL_ImgResampler
+
+- display_name:이미지 리샘플러
+
+- category: IRL_Adjustments
+
+- 역할: 이미지에 노이즈를 추가하고 디노이즈 재처리를 통해 품질 향상을 시도합니다. 이미지 인코드, 디코드도 전부 처리합니다.
+
+- Inputs: model, clip, vae, image, noise option, sampler 옵션
+
+- Outputs: image
+
+#신규 노드#
+기능 분할
+IRL_ImgResamplerMix
+
+- node_id: IRL_ImgResamplerMix
+
+- display_name:이미지 리샘플러(믹스)
+
+- category: IRL_Adjustments
+
+- 역할: 이미지에 노이즈를 추가하고 디노이즈 재처리를 통해 품질 향상을 시도합니다. 이미지 인코드, 디코드도 전부 처리합니다.
+
+- Inputs: model, clip, vae, image, noise option, sampler 옵션
+
+- Outputs: image
+
+#신규 노드#
+로라 로드 처리 가능
+IRL_ImgResamplerAnd
+
+- node_id: IRL_ImgResamplerAnd
+
+- display_name:이미지 리샘플러(로라로딩)
+
+- category: IRL_Adjustments
+
+- 역할: 로라를 읽고 이미지에 노이즈를 추가한 뒤 디노이즈 재처리를 통해 품질 향상을 시도합니다. 이미지 인코드, 디코드도 전부 처리합니다.
+
+- Inputs: model, clip, vae, image, noise option, sampler 옵션
+
+- Outputs: image
+
+#노드 기능 추가#
 IRL_ImgDetailer
 
 - node_id: IRL_ImgDetailer
@@ -171,10 +232,25 @@ IRL_ImgDetailer
 
 - 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
 
-- Inputs: image, 샤프닝, 히스토그램 평활화, 유연화, 라인강조 슬라이더
+- Inputs: image, 샤프닝, 히스토그램 평활화, 유연화, 라인강조 슬라이더, 라인 색 헥스입력슬롯 추가
 
 - Outputs: image
 
+#신규 노드#
+
+IRL_NoiseCleaner
+
+- node_id: IRL_NoiseCleaner
+
+- display_name: 노이즈 제거기
+
+- category: IRL_Adjustments
+
+- 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
+
+- Inputs: image, 마스크, 노이즈세팅, 색상강조 슬라이더, 라인강조 슬라이더 
+
+- Outputs: image
 
 [Filter Nodes]
 
