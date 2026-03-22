@@ -37,10 +37,15 @@ ComfyUI는 확장팩 로딩 시 requirements.txt를 자동 설치합니다.
 Image Refiner Lite판에서는 requirements.txt를 빈 파일로 유지합니다.
 
 대신, 다음의 코드로 최소 의존성 설치법을 남깁니다.
+
 python -m pip install --no-deps simpleeval
+
 python -m pip install --no-deps gitpython
+
 python -m pip install --no-deps pilgram
+
 python -m pip install --no-deps matplotlib
+
 
 위 패키지들은 라이트판에서 사용하는 안전한 최소 의존성입니다.
 설치는 선택 사항이며, 대부분의 기능은 기본 상태에서도 작동합니다.
