@@ -909,9 +909,13 @@ class IRL_ImgResamplerAnd(IO.ComfyNode):
 
         # LoRA activate
         if lora_name and (lora_str != 0.0 or clip_str != 0.0):
-            lora_path = folder_paths.get_full_path_or_raise("loras", lora_name + ".safetensors")
-            lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
-            model, clip = comfy.sd.load_lora_for_models(model, clip, lora, lora_str, clip_str)
+            try:
+                lora_path = folder_paths.get_full_path_or_raise("loras", lora_name + ".safetensors")
+                lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
+                model, clip = comfy.sd.load_lora_for_models(model, clip, lora, lora_str, clip_str)
+            finally:
+                del lora
+
 
         # Latent Image Settings
         latent_image = None
