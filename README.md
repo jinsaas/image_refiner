@@ -231,19 +231,38 @@ IRL_ImgDetailer
 
 - Outputs: image
 
+
+# 상위호환인 노드들을 추가해서 NoiseCleaner는 삭제되었습니다.
+
 #신규 노드#
 
-IRL_NoiseCleaner
+IRL_AutoInpaint_CV
 
-- node_id: IRL_NoiseCleaner
+- node_id: IRL_AutoInpaint_CV
 
-- display_name: 노이즈 제거기
+- display_name: CV 오토 인페인팅
 
 - category: IRL_Adjustments
 
 - 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
 
-- Inputs: image, 마스크, 노이즈세팅, 색상강조 슬라이더, 라인강조 슬라이더 
+- Inputs: image, 마스크, 팔레트 이미지, 노이즈세팅, 색상강조 슬라이더, 채도강화, 라인강조 슬라이더, 샤프닝, 라이트밸런스, 대비강화
+
+- Outputs: image
+- 
+#신규 노드#
+
+IRL_ResamplerInpaint
+
+- node_id: IRL_ResamplerInpaint
+
+- display_name: 리샘플러 세미오토 인페인팅
+
+- category: IRL_inpaint
+
+- 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
+
+- Inputs: image, 마스크, 팔레트 이미지, 노이즈세팅, 색상강조 슬라이더,  채도강화, 라인강조 슬라이더, 샤프닝, 라이트밸런스, 대비강화
 
 - Outputs: image
 
@@ -579,7 +598,6 @@ IRL_WhiteNoise
 - Inputs: width, height, scale
 
 - Outputs: image
-
 
 [Analysis Nodes]
 
