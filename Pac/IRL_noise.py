@@ -1,19 +1,12 @@
 # -------------------------------
-# IR Lite — Adjustments Nodes
+# IR Lite — Noise Nodes
 # -------------------------------
 
-import os
 import numpy as np
-import torch
-from torch import nn
-import torch.nn.functional as F
-import cv2
 from PIL import Image
-from skimage import exposure
-import random
+import torch
+import cv2
 
-
-import comfy
 from comfy_api.latest import IO, UI
 
 # ---------------------------------------
@@ -22,14 +15,16 @@ from comfy_api.latest import IO, UI
 
 def to_tensor_output(canvas: Image.Image):
     arr = np.array(canvas).astype(np.float32) / 255.0
-    arr = arr[None, ...]
+    arr = arr[None, ...]#add batch
+
+
     return torch.from_numpy(arr)
 
 def to_numpy_image(image):
     if isinstance(image, torch.Tensor):
         arr = image[0].cpu().numpy()
         if arr.max() <= 1.0:
-            arr = (arr * 255).clip(0,255).astype(np.uint8)
+            arr = (arr * 255).clip(0, 255).astype(np.uint8)
         else:
             arr = arr.astype(np.uint8)
         return arr
@@ -40,327 +35,299 @@ def to_numpy_image(image):
     else:
         raise TypeError("Unsupported image type")
 
-def apply_color_str(arr, color, strength):
-    strength = strength[..., None]
-    blended = (1 - strength) * arr + strength * color[None, None, :]
-    return blended
-
-
-def normalize_intensity(gray, black_point, white_point, gradient_str=0.0):
-
-    t = np.clip((gray - black_point) / (white_point - black_point), 0, 1)
-
-    # Using to sigmoid
-    if gradient_str > 0:
-        t = 1 / (1 + np.exp(-(t - 0.5) * 10 * gradient_str))
-    return t
-
 # -------------------------------
-# Node definitions
+# Gaussian Noise
 # -------------------------------
 
-class IRL_RGBLevels(IO.ComfyNode):
-
+class IRL_AddGaussianNoise(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
         return IO.Schema(
-            node_id="IRL_RGBLevels",
-            display_name="RGB 레벨 + 색감 강조",
-            category="이미지 리파이너/이미지조정",
-            description="각 RGB 채널 강도와 색감 강조를 cv2 기반으로 조정합니다.",
+            node_id="IRL_AddGaussianNoise",
+            display_name="가우시안 노이즈 추가",
+            description="이미지에 가우시안 노이즈를 추가합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="조정할 대상 이미지"),
-                IO.Float.Input("r_level", default=1.00, min=0.00, max=3.00, step=0.01, tooltip="R 채널 강도"),
-                IO.Float.Input("g_level", default=1.00, min=0.00, max=3.00, step=0.01, tooltip="G 채널 강도"),
-                IO.Float.Input("b_level", default=1.00, min=0.00, max=3.00, step=0.01, tooltip="B 채널 강도"),
-                IO.Float.Input("color_sen", default=0.30, min=0.00, max=1.00, step=0.01, tooltip="색감 민감도"),
-                IO.Int.Input("color_sig", default=10, min=0, max=50, step=1, tooltip="색감 sigma"),
-                IO.Float.Input("color_str", default=0.50, min=0.00, max=2.00, step=0.01, tooltip="채도 강조 강도")
+                IO.Image.Input("image", tooltip="노이즈를 추가할 이미지"),
+                IO.Float.Input("sigma", default=0.050, min=0.000, max=200.000, step=0.001,
+                               tooltip="가우시안 노이즈의 표준편차"),
             ],
             outputs=[
-                IO.Image.Output("image", tooltip="레벨 및 색감 조정된 결과 이미지")
-            ]
+                IO.Image.Output("image", tooltip="노이즈가 추가된 이미지"),
+            ],
+            category="이미지 리파이너/노이즈"
         )
 
     @classmethod
-    def execute(cls, image, r_level=1.00, g_level=1.00, b_level=1.00,
-                color_sen=0.30, color_sig=10, color_str=0.50) -> IO.NodeOutput:
-
-        arr = to_numpy_image(image).astype(np.uint8)
-
-        # --- RGB level adj ---
-        b,g,r = cv2.split(arr.astype(np.float32))
-        r *= r_level
-        g *= g_level
-        b *= b_level
-        arr = cv2.merge([b,g,r])
-        arr = np.clip(arr, 0, 255).astype(np.uint8)
-
-        # --- color str ---
-        if color_sen > 0.0:
-            arr = cv2.detailEnhance(arr, sigma_s=color_sig, sigma_r=color_sen)
-
-        if color_str > 0.0:
-            hsv = cv2.cvtColor(arr, cv2.COLOR_BGR2HSV).astype(np.float32)
-            hsv[:,:,1] = np.clip(hsv[:,:,1] * (1.0 + color_str), 0, 255)
-            arr = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
-
-        return IO.NodeOutput(to_tensor_output(Image.fromarray(arr)))
-
-
-# -------------------------------
-
-
-class IRL_BlackWhiteLevels(IO.ComfyNode):
-
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="IRL_BlackWhiteLevels",
-            display_name="블랙 & 화이트 레벨",
-            category="이미지 리파이너/이미지조정",
-            description="이미지의 전체 블랙/화이트 포인트를 조정합니다.",
-            inputs=[
-                IO.Image.Input("image", tooltip="조정할 대상 이미지"),
-                IO.Int.Input("black_point", default=0, min=0, max=255,
-                             tooltip="블랙 포인트 (어두운 영역 기준)"),
-                IO.Int.Input("white_point", default=255, min=0, max=255,
-                             tooltip="화이트 포인트 (밝은 영역 기준)"),
-            ],
-            outputs=[
-                IO.Image.Output("image", tooltip="블랙/화이트 포인트 조정된 결과 이미지")
-            ],
-        )
-
-    @classmethod
-    def execute(cls, image, black_point=0, white_point=0) -> IO.NodeOutput:
-        arr = to_numpy_image(image)
-        arr = exposure.rescale_intensity(arr, in_range=(black_point, white_point))
-        arr = np.clip(arr, 0, 255).astype(np.uint8)
-        return IO.NodeOutput(to_tensor_output(Image.fromarray(arr)))
-
-# -------------------------------
-
-
-class IRL_LevelsAdjustment(IO.ComfyNode):
-
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="IRL_LevelsAdjustment",
-            display_name="레벨 조정",
-            category="이미지 리파이너/이미지조정",
-            description="입력/출력 포인트와 감마 보정을 통한 레벨 조정을 수행합니다.",
-            inputs=[
-                IO.Image.Input("image", tooltip="조정할 대상 이미지"),
-                IO.Float.Input("in_brightness", default=1.00, min=0.00, max=3.00, step=0.01,
-                               tooltip="입력 밝기 배율"),
-                IO.Float.Input("gamma", default=1.00, min=0.01, max=5.00, step=0.01,
-                               tooltip="감마 보정 값"),
-                IO.Float.Input("out_brightness", default=1.00, min=0.00, max=3.00, step=0.01,
-                               tooltip="출력 밝기 배율")
-            ],
-            outputs=[
-                IO.Image.Output("image", tooltip="밝기 및 감마 조정된 결과 이미지")
-            ]
-        )
-
-    @classmethod
-    def execute(cls, image, in_brightness=1.00, gamma=1.00, out_brightness=1.00) -> IO.NodeOutput:
+    def execute(cls, image, sigma) -> IO.NodeOutput:
         arr = to_numpy_image(image).astype(np.float32)
 
-        arr = arr * in_brightness
+        noise = np.random.normal(0, sigma * 5, arr.shape)
+        noisy = np.clip(arr + noise, 0, 255).astype(np.uint8)
 
-        arr = exposure.adjust_gamma(arr, gamma)
-
-        arr = arr * out_brightness
-
-        arr = np.clip(arr, 0, 255).astype(np.uint8)
-        return IO.NodeOutput(to_tensor_output(Image.fromarray(arr)))
+        pil_img = Image.fromarray(noisy)
+        return IO.NodeOutput(to_tensor_output(pil_img))
 
 # -------------------------------
+# Salt & Pepper Noise
+# -------------------------------
 
-
-class IRL_GradientMap(IO.ComfyNode):
-
+class IRL_SaltPepperNoise(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
         return IO.Schema(
-            node_id="IRL_GradientMap",
-            display_name="그라디언트 맵",
-            category="이미지 리파이너/이미지조정",
-            description="이미지 값을 두 색상 사이의 그라디언트로 매핑합니다.",
+            node_id="IRL_SaltPepperNoise",
+            display_name="소금 & 후추 노이즈",
+            description="이미지에 소금&후추 노이즈를 추가합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="팔레트 강조 및 그라디언트 매핑을 적용할 원본 이미지"),
-                IO.Combo.Input("red", options=["off", "on"], default="off", tooltip="적색 팔레트 설정"),
-                IO.Combo.Input("magenta", options=["off", "on"], default="off", tooltip="자홍색 팔레트 설정"),
-                IO.Combo.Input("yellow", options=["off", "on"], default="off", tooltip="노란색 팔레트 설정"),
-                IO.Combo.Input("green", options=["off", "on"], default="off", tooltip="녹색 팔레트 설정"),
-                IO.Combo.Input("blue", options=["off", "on"], default="off", tooltip="청색 팔레트 설정"),
-                IO.Combo.Input("cyan", options=["off", "on"], default="off", tooltip="청록색 팔레트 설정"),
-                IO.Combo.Input("black", options=["off", "on"], default="off", tooltip="흑색 팔레트 설정"),
-                IO.Int.Input("color_str", default=0, min=0, max=255, step=1,
-                               tooltip="팔레트 색상 강조 강도 (값이 클수록 팔레트 색상이 더 강하게 적용됨)"),
-                IO.Combo.Input("base_suf", options=["off", "on"], default="off", tooltip="원본 색상 유지 여부"),
-                IO.Combo.Input("blend_mode", options=["off", "soft_blend", "blend", "hard_blend"], default="off", tooltip="다중 활성 팔레트 색상 블렌딩 모드"),
-                IO.Float.Input("gradient_str", default=0.0, min=0.0, max=1.0, step=0.01, tooltip="밝기 기반 그라디언트 조정"),
-                IO.Combo.Input("auto_gradient", options=["off", "on"], default="off", tooltip="다중 활성 팔레트를 자동 보간하여 그라디언트 생성")
+                IO.Image.Input("image", tooltip="노이즈를 추가할 이미지"),
+                IO.Float.Input("amount", default=0.001, min=0.000, max=1.000, step=0.001,
+                               tooltip="노이즈의 비율 (0~1)"),
             ],
             outputs=[
-                IO.Image.Output("image", tooltip="이미지를 지정된 색상 그라디언트로 매핑한 결과 이미지")
-            ]
-        )
-
-
-    @classmethod
-    def execute(cls, image, red="off", magenta="off", yellow="off", green="off", blue="off", cyan="off", black="off",
-                color_str=0, base_suf="off", gradient_str=0.0, blend_mode="off", auto_gradient="off") -> IO.NodeOutput:
-
-        arr = to_numpy_image(image).astype(np.float32)
-        if arr.max() <= 1.0:
-            arr *= 255.0
-
-        active_colors = []
-        if red == "on": active_colors.append(np.array([255, 0, 0], dtype=np.float32))
-        if magenta == "on": active_colors.append(np.array([255, 0, 255], dtype=np.float32))
-        if yellow == "on": active_colors.append(np.array([255, 255, 0], dtype=np.float32))
-        if green == "on": active_colors.append(np.array([0, 255, 0], dtype=np.float32))
-        if blue == "on": active_colors.append(np.array([0, 0, 255], dtype=np.float32))
-        if cyan == "on": active_colors.append(np.array([0, 255, 255], dtype=np.float32))
-        if black == "on": active_colors.append(np.array([0, 0, 0], dtype=np.float32))
-
-        gray = cv2.cvtColor(arr.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
-        t = normalize_intensity(gray, 0, 255, gradient_str)  # (H,W)
-        t = t[..., None]
-
-        w_dark = color_str / 255.0
-
-        if base_suf == "on":
-            w_light = 1.0
-        else:
-            w_light = 0.0
-
-        if len(active_colors) == 0:
-            if base_suf == "on":
-                mapped = arr.copy()
-            else:
-                mapped = np.stack([gray]*3, axis=-1)
-
-        else:
-            if auto_gradient == "on" and len(active_colors) >= 2:
-                idx = (t * (len(active_colors)-1)).astype(int).squeeze(-1)
-                frac = (t * (len(active_colors)-1)).squeeze(-1) - idx
-                colorA = np.array(active_colors)[idx]
-                colorB = np.array(active_colors)[np.clip(idx+1, 0, len(active_colors)-1)]
-                frac = frac[..., None]
-                palette_mix = (1-frac) * colorA + frac * colorB
-                mapped = (w_light * arr) + (w_dark * palette_mix)
-
-            elif len(active_colors) > 1:
-                if blend_mode == "off":
-                    mapped = arr.copy()
-                    for c in active_colors:
-                        mapped = (1 - t) * mapped + t * c[None, None, :]
-                else:
-                    if blend_mode == "soft_blend":
-                        threshold = 35
-                    elif blend_mode == "blend":
-                        threshold = 40
-                    elif blend_mode == "hard_blend":
-                        threshold = 50
-                    else:
-                        threshold = 40
-
-                    mapped = np.zeros((*gray.shape, 3), dtype=np.float32)
-                    weights_total = np.zeros(gray.shape, dtype=np.float32)
-                    for c in active_colors:
-                        dist = np.linalg.norm(arr - c[None, None, :], axis=-1)
-                        w = np.exp(-(dist ** 2) / (2 * (threshold ** 2)))
-                        mapped += w[..., None] * c
-                        weights_total += w
-                    mapped /= np.maximum(weights_total[..., None], 1e-6)
-
-                mapped = (w_light * arr) + (w_dark * mapped)
-
-            else:
-                c = active_colors[0]
-                mapped = (w_light * arr) + (w_dark * c[None, None, :])
-
-        mapped = np.clip(mapped, 0, 255).astype(np.uint8)
-        return IO.NodeOutput(to_tensor_output(Image.fromarray(mapped)))
-
-
-
-
-
-
-
-
-
-# -------------------------------
-
-
-class IRL_ShadowsHighlights(IO.ComfyNode):
-
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="IRL_ShadowsHighlights",
-            display_name="그림자 & 하이라이트",
-            category="이미지 리파이너/이미지조정",
-            description="LAB 색 공간에서 그림자와 하이라이트를 조정합니다.",
-            inputs=[
-                IO.Image.Input("image", tooltip="조정할 대상 이미지"),
-                IO.Float.Input("shadow_amount", default=0.50, min=0.00, max=5.00, step=0.01,
-                               tooltip="그림자 영역 밝기 조정 강도"),
-                IO.Float.Input("highlight_amount", default=0.50, min=0.00, max=5.00, step=0.01,
-                               tooltip="하이라이트 영역 밝기 조정 강도"),
+                IO.Image.Output("image", tooltip="노이즈가 추가된 이미지"),
             ],
-            outputs=[
-                IO.Image.Output("image", tooltip="그림자/하이라이트가 조정된 결과 이미지")
-            ],
+            category="이미지 리파이너/노이즈"
         )
 
     @classmethod
-    def execute(cls, image, shadow_amount=0.50, highlight_amount=0.50) -> IO.NodeOutput:
+    def execute(cls, image, amount) -> IO.NodeOutput:
         arr = to_numpy_image(image)
-        if arr is None or arr.ndim != 3:
-            raise ValueError("Invalid input image for ShadowsHighlights")
+        noisy = arr.copy()
 
-        lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB).astype(np.float32)
+        num_salt = int(np.ceil(amount * arr.size * 0.5))
+        coords = [np.random.randint(0, i, num_salt) for i in arr.shape]
+        noisy[tuple(coords)] = 255
 
-        L = lab[..., 0] / 255.0
-        shadow_mask = (L < 0.5).astype(np.float32)
-        highlight_mask = (L >= 0.5).astype(np.float32)
+        num_pepper = int(np.ceil(amount * arr.size * 0.5))
+        coords = [np.random.randint(0, i, num_pepper) for i in arr.shape]
+        noisy[tuple(coords)] = 0
 
-        L = L + shadow_mask * shadow_amount * (0.5 - L)
-        L = L - highlight_mask * highlight_amount * (L - 0.5)
-
-        lab[..., 0] = np.clip(L * 255.0, 0, 255)
-
-        out = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
-        if out is None:
-            raise RuntimeError("cv2.cvtColor failed in ShadowsHighlights")
-
-        return IO.NodeOutput(to_tensor_output(Image.fromarray(out)))
-
-
+        pil_img = Image.fromarray(noisy)
+        return IO.NodeOutput(to_tensor_output(pil_img))
 
 # -------------------------------
-ADJUSTMENTS_NODE_CLASS_MAPPINGS = {
-    "IRL_RGBLevels": IRL_RGBLevels,
-    "IRL_BlackWhiteLevels": IRL_BlackWhiteLevels,
-    "IRL_LevelsAdjustment": IRL_LevelsAdjustment,
-    "IRL_GradientMap": IRL_GradientMap,
-    "IRL_ShadowsHighlights": IRL_ShadowsHighlights,
+# Perlin Noise (independent generator)
+# -------------------------------
+
+class IRL_PerlinNoise(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="IRL_PerlinNoise",
+            display_name="퍼린 노이즈",
+            description="퍼린 노이즈 패턴 이미지를 생성합니다.",
+            inputs=[
+                IO.Int.Input("width", default=256, min=16, max=2048, tooltip="출력 이미지의 가로 크기"),
+                IO.Int.Input("height", default=256, min=16, max=2048, tooltip="출력 이미지의 세로 크기"),
+                IO.Float.Input("scale", default=32.0, min=4.0, max=128.0, step=1.0,
+                               tooltip="노이즈 스케일 (패턴 크기 조절)"),
+                IO.Int.Input("octaves", default=4, min=1, max=8, tooltip="옥타브 수 (패턴 레이어 수)"),
+                IO.Float.Input("persistence", default=0.5, min=0.1, max=1.0, step=0.1,
+                               tooltip="옥타브별 세기 감소율"),
+            ],
+            outputs=[
+                IO.Image.Output("image", tooltip="생성된 퍼린 노이즈 이미지"),
+            ],
+            category="이미지 리파이너/노이즈"
+        )
+
+    @classmethod
+    def execute(cls, width, height, scale, octaves, persistence) -> IO.NodeOutput:
+        def fade(t): return t * t * t * (t * (t * 6 - 15) + 10)
+        def lerp(a, b, t): return a + t * (b - a)
+        def grad(hash, x, y):
+            h = hash & 3
+            u = x if h < 2 else y
+            v = y if h < 2 else x
+            return (u if (h & 1) == 0 else -u) + (v if (h & 2) == 0 else -v)
+
+        perm = np.arange(256, dtype=int)
+        perm = np.tile(perm, 2)
+
+        def perlin(x, y):
+            xi = int(x) & 255
+            yi = int(y) & 255
+            xf = x - int(x)
+            yf = y - int(y)
+            u = fade(xf)
+            v = fade(yf)
+
+            aa = perm[perm[xi] + yi]
+            ab = perm[perm[xi] + yi + 1]
+            ba = perm[perm[xi + 1] + yi]
+            bb = perm[perm[xi + 1] + yi + 1]
+
+            x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u)
+            x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u)
+            return (lerp(x1, x2, v) + 1) / 2
+
+        def fractal_perlin(x, y, octaves, persistence):
+            total = 0
+            frequency = 1
+            amplitude = 1
+            max_value = 0
+            for _ in range(octaves):
+                total += perlin(x * frequency, y * frequency) * amplitude
+                max_value += amplitude
+                amplitude *= persistence
+                frequency *= 2
+            return total / max_value
+
+        arr = np.zeros((height, width), dtype=np.float32)
+        for y in range(height):
+            for x in range(width):
+                arr[y, x] = fractal_perlin(x / scale, y / scale, octaves, persistence)
+
+        arr = (arr * 255).astype(np.uint8)
+        arr_rgb = np.stack([arr] * 3, axis=-1)
+
+        pil_img = Image.fromarray(arr_rgb)
+        return IO.NodeOutput(to_tensor_output(pil_img))
+
+# -------------------------------
+# Random Color (independent generator)
+# -------------------------------
+
+class IRL_RandomColor(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="IRL_RandomColor",
+            display_name="랜덤 컬러 이미지",
+            description="무작위 색상으로 채워진 이미지를 생성합니다.",
+            inputs=[
+                IO.Int.Input("width", default=256, min=16, max=2048, tooltip="출력 이미지의 가로 크기"),
+                IO.Int.Input("height", default=256, min=16, max=2048, tooltip="출력 이미지의 세로 크기"),
+            ],
+            outputs=[
+                IO.Image.Output("image", tooltip="랜덤 색상으로 채워진 이미지"),
+            ],
+            category="이미지 리파이너/노이즈"
+        )
+
+    @classmethod
+    def execute(cls, width, height) -> IO.NodeOutput:
+        arr = np.random.randint(0, 256, (height, width, 3), dtype=np.uint8)
+        pil_img = Image.fromarray(arr, mode="RGB")
+        return IO.NodeOutput(to_tensor_output(pil_img))
+
+# -------------------------------
+# White Noise (independent generator)
+# -------------------------------
+
+class IRL_WhiteNoise(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="IRL_WhiteNoise",
+            display_name="화이트 노이즈",
+            description="화이트 노이즈 패턴 이미지를 생성합니다.",
+            inputs=[
+                IO.Int.Input("width", default=256, min=16, max=2048, tooltip="출력 이미지의 가로 크기"),
+                IO.Int.Input("height", default=256, min=16, max=2048, tooltip="출력 이미지의 세로 크기"),
+                IO.Float.Input("scale", default=8.0, min=1.0, max=64.0, step=1.0,
+                               tooltip="노이즈 스케일 (패턴 크기 조절)"),
+            ],
+            outputs=[
+                IO.Image.Output("image", tooltip="생성된 화이트 노이즈 이미지"),
+            ],
+            category="이미지 리파이너/노이즈"
+        )
+
+    @classmethod
+    def execute(cls, width, height, scale) -> IO.NodeOutput:
+        def fade(t): return t * t * t * (t * (t * 6 - 15) + 10)
+        def lerp(a, b, t): return a + t * (b - a)
+        def grad(hash, x, y):
+            h = hash & 3
+            u = x if h < 2 else y
+            v = y if h < 2 else x
+            return (u if (h & 1) == 0 else -u) + (v if (h & 2) == 0 else -v)
+
+        perm = np.arange(256, dtype=int)
+        np.random.shuffle(perm)
+        perm = np.tile(perm, 2)
+
+        def perlin(x, y):
+            xi = int(x) & 255
+            yi = int(y) & 255
+            xf = x - int(x)
+            yf = y - int(y)
+            u = fade(xf)
+            v = fade(yf)
+
+            aa = perm[perm[xi] + yi]
+            ab = perm[perm[xi] + yi + 1]
+            ba = perm[perm[xi + 1] + yi]
+            bb = perm[perm[xi + 1] + yi + 1]
+
+            x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u)
+            x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u)
+            return (lerp(x1, x2, v) + 1) / 2
+
+        arr = np.zeros((height, width), dtype=np.float32)
+        for y in range(height):
+            for x in range(width):
+                arr[y, x] = perlin(x / scale, y / scale)
+
+        arr = (arr * 255).astype(np.uint8)
+        arr_rgb = np.stack([arr] * 3, axis=-1)
+
+        pil_img = Image.fromarray(arr_rgb)
+        return IO.NodeOutput(to_tensor_output(pil_img))
+
+# -------------------------------
+# RGBColor (independent generator)
+# -------------------------------
+
+class IRL_RGBColor(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="IRL_RGBColor",
+            display_name="컬러 이미지",
+            description="지정된 RGB 샘플 코드 색상으로 채워진 이미지를 생성합니다.",
+            inputs=[
+                IO.Int.Input("str_r", default=0, min=0, max=255, tooltip="적색 영역"),
+                IO.Int.Input("str_g", default=0, min=0, max=255, tooltip="녹색 영역"),
+                IO.Int.Input("str_b", default=0, min=0, max=255, tooltip="청색 영역"),
+                IO.Int.Input("width", default=256, min=16, max=2048, tooltip="출력 이미지의 가로 크기"),
+                IO.Int.Input("height", default=256, min=16, max=2048, tooltip="출력 이미지의 세로 크기"),
+            ],
+            outputs=[
+                IO.Image.Output("image", tooltip="단일 색상으로 채워진 이미지"),
+            ],
+            category="이미지 리파이너/노이즈"
+        )
+
+    @classmethod
+    def execute(cls, str_r, str_g, str_b, width, height) -> IO.NodeOutput:
+        
+        str_r = max(0, min(255, str_r))
+        str_g = max(0, min(255, str_g))
+        str_b = max(0, min(255, str_b))
+        
+        arr = np.full((height, width, 3), (str_r, str_g, str_b), dtype=np.uint8)
+        pil_img = Image.fromarray(arr, mode="RGB")
+        return IO.NodeOutput(to_tensor_output(pil_img))
+
+# -------------------------------
+
+NOISE_NODE_CLASS_MAPPINGS = {
+    "IRL_AddGaussianNoise": IRL_AddGaussianNoise,
+    "IRL_SaltPepperNoise": IRL_SaltPepperNoise,
+    "IRL_PerlinNoise": IRL_PerlinNoise,
+    "IRL_RandomColor": IRL_RandomColor,
+    "IRL_WhiteNoise": IRL_WhiteNoise,
+    "IRL_RGBColor": IRL_RGBColor,
 }
 
-ADJUSTMENTS_NODE_DISPLAY_NAME_MAPPINGS = {
-    "IRL_RGBLevels": "RGB 레벨",
-    "IRL_BlackWhiteLevels": "블랙 & 화이트 레벨",
-    "IRL_LevelsAdjustment": "레벨 조정",
-    "IRL_GradientMap": "그라디언트 맵",
-    "IRL_ShadowsHighlights": "그림자 & 하이라이트",
+NOISE_NODE_DISPLAY_NAME_MAPPINGS = {
+    "IRL_AddGaussianNoise": "가우시안 노이즈 추가",
+    "IRL_SaltPepperNoise": "소금 & 후추 노이즈",
+    "IRL_PerlinNoise": "퍼린 노이즈",
+    "IRL_RandomColor": "랜덤 컬러 이미지",
+    "IRL_WhiteNoise": "화이트 노이즈",
+    "IRL_RGBColor": "컬러 이미지",
 }
-
 # -------------------------------
