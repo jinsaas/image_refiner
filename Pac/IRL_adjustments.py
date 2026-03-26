@@ -1,6 +1,5 @@
 # -------------------------------
 # IR Lite — Adjustments Nodes
-# (LOCALE-based multilingual description support included)
 # -------------------------------
 
 import os
@@ -14,11 +13,13 @@ from skimage import exposure
 import random
 
 
-# ComfyUI 최신 API
 import comfy
 from comfy_api.latest import IO, UI
 
-# -------------------------------
+# ---------------------------------------
+# Header Utils
+#----------------------------------------
+
 def to_tensor_output(canvas: Image.Image):
     arr = np.array(canvas).astype(np.float32) / 255.0
     arr = arr[None, ...]
@@ -49,14 +50,14 @@ def normalize_intensity(gray, black_point, white_point, gradient_str=0.0):
 
     t = np.clip((gray - black_point) / (white_point - black_point), 0, 1)
 
-    # sigmoid로 경계 부드럽게
+    # Using to sigmoid
     if gradient_str > 0:
         t = 1 / (1 + np.exp(-(t - 0.5) * 10 * gradient_str))
     return t
+
 # -------------------------------
 # Node definitions
 # -------------------------------
-
 
 class IRL_RGBLevels(IO.ComfyNode):
 
@@ -64,31 +65,48 @@ class IRL_RGBLevels(IO.ComfyNode):
     def define_schema(cls):
         return IO.Schema(
             node_id="IRL_RGBLevels",
-            display_name="RGB 레벨",
+            display_name="RGB 레벨 + 색감 강조",
             category="이미지 리파이너/이미지조정",
-            description="각 RGB 채널의 강도 레벨을 조정합니다.",
+            description="각 RGB 채널 강도와 색감 강조를 cv2 기반으로 조정합니다.",
             inputs=[
                 IO.Image.Input("image", tooltip="조정할 대상 이미지"),
                 IO.Float.Input("r_level", default=1.00, min=0.00, max=3.00, step=0.01, tooltip="R 채널 강도"),
                 IO.Float.Input("g_level", default=1.00, min=0.00, max=3.00, step=0.01, tooltip="G 채널 강도"),
-                IO.Float.Input("b_level", default=1.00, min=0.00, max=3.00, step=0.01, tooltip="B 채널 강도")
+                IO.Float.Input("b_level", default=1.00, min=0.00, max=3.00, step=0.01, tooltip="B 채널 강도"),
+                IO.Float.Input("color_sen", default=0.30, min=0.00, max=1.00, step=0.01, tooltip="색감 민감도"),
+                IO.Int.Input("color_sig", default=10, min=0, max=50, step=1, tooltip="색감 sigma"),
+                IO.Float.Input("color_str", default=0.50, min=0.00, max=2.00, step=0.01, tooltip="채도 강조 강도")
             ],
             outputs=[
-                IO.Image.Output("image", tooltip="레벨 조정된 결과 이미지")
+                IO.Image.Output("image", tooltip="레벨 및 색감 조정된 결과 이미지")
             ]
         )
 
     @classmethod
-    def execute(cls, image, r_level=1.00, g_level=1.00, b_level=1.00) -> IO.NodeOutput:
-        arr = to_numpy_image(image).astype(np.float32)
+    def execute(cls, image, r_level=1.00, g_level=1.00, b_level=1.00,
+                color_sen=0.30, color_sig=10, color_str=0.50) -> IO.NodeOutput:
 
-        # 채널별 강도 조정
-        arr[..., 0] = arr[..., 0] * r_level
-        arr[..., 1] = arr[..., 1] * g_level
-        arr[..., 2] = arr[..., 2] * b_level
+        arr = to_numpy_image(image).astype(np.uint8)
 
+        # --- RGB level Adj ---
+        b,g,r = cv2.split(arr.astype(np.float32))
+        r *= r_level
+        g *= g_level
+        b *= b_level
+        arr = cv2.merge([b,g,r])
         arr = np.clip(arr, 0, 255).astype(np.uint8)
+
+        # --- color_str ---
+        if color_sen > 0.0:
+            arr = cv2.detailEnhance(arr, sigma_s=color_sig, sigma_r=color_sen)
+
+        if color_str > 0.0:
+            hsv = cv2.cvtColor(arr, cv2.COLOR_BGR2HSV).astype(np.float32)
+            hsv[:,:,1] = np.clip(hsv[:,:,1] * (1.0 + color_str), 0, 255)
+            arr = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
         return IO.NodeOutput(to_tensor_output(Image.fromarray(arr)))
+
 
 # -------------------------------
 
