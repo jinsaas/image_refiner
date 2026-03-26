@@ -88,7 +88,7 @@ class IRL_RGBLevels(IO.ComfyNode):
 
         arr = to_numpy_image(image).astype(np.uint8)
 
-        # --- RGB 레벨 조정 ---
+        # --- RGB level adj ---
         b,g,r = cv2.split(arr.astype(np.float32))
         r *= r_level
         g *= g_level
@@ -96,7 +96,7 @@ class IRL_RGBLevels(IO.ComfyNode):
         arr = cv2.merge([b,g,r])
         arr = np.clip(arr, 0, 255).astype(np.uint8)
 
-        # --- 색감 강조 ---
+        # --- color str ---
         if color_sen > 0.0:
             arr = cv2.detailEnhance(arr, sigma_s=color_sig, sigma_r=color_sen)
 
