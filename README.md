@@ -135,7 +135,6 @@ IRL_GradientMap
 - Outputs: image
 
 
-
 IRL_ShadowsHighlights
 
 - node_id: IRL_ShadowsHighlights
@@ -150,8 +149,38 @@ IRL_ShadowsHighlights
 
 - Outputs: image
 
+#신규 노드#
 
-#패치 노드#
+IRL_ColorTransfer
+
+- node_id: IRL_ColorTransfer
+
+- display_name: 컬러 트랜스퍼
+
+- category: IRL_Adjustments
+
+- 역할: 원본이미지를 참조이미지의 색상 기준으로 색상값을 교정합니다.
+
+- Inputs: image, 팔레트 이미지
+
+- Outputs: image
+
+#노드 기능 추가#
+IRL_ImgDetailer
+
+- node_id: IRL_ImgDetailer
+
+- display_name: 이미지 디테일러
+
+- category: IRL_Adjustments
+
+- 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
+
+- Inputs: image, 샤프닝, 히스토그램 평활화, 유연화, 라인강조 슬라이더, 라인 색 헥스입력슬롯, 컬러트랜스퍼
+
+- Outputs: image
+
+
 디폴트 값 안정화
 IRL_ImgResampler
 
@@ -167,8 +196,6 @@ IRL_ImgResampler
 
 - Outputs: image
 
-#신규 노드#
-
 디폴트 값 안정화
 IRL_ImgResampler
 
@@ -184,7 +211,6 @@ IRL_ImgResampler
 
 - Outputs: image
 
-#신규 노드#
 기능 분할
 IRL_ImgResamplerMix
 
@@ -200,7 +226,6 @@ IRL_ImgResamplerMix
 
 - Outputs: image
 
-#신규 노드#
 로라 로드 처리 가능
 IRL_ImgResamplerAnd
 
@@ -216,26 +241,6 @@ IRL_ImgResamplerAnd
 
 - Outputs: image
 
-#노드 기능 추가#
-IRL_ImgDetailer
-
-- node_id: IRL_ImgDetailer
-
-- display_name: 이미지 디테일러
-
-- category: IRL_Adjustments
-
-- 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
-
-- Inputs: image, 샤프닝, 히스토그램 평활화, 유연화, 라인강조 슬라이더, 라인 색 헥스입력슬롯 추가
-
-- Outputs: image
-
-
-# 상위호환인 노드들을 추가해서 NoiseCleaner는 삭제되었습니다.
-
-#신규 노드#
-
 IRL_AutoInpaint_CV
 
 - node_id: IRL_AutoInpaint_CV
@@ -250,7 +255,6 @@ IRL_AutoInpaint_CV
 
 - Outputs: image
 - 
-#신규 노드#
 
 IRL_ResamplerInpaint
 
@@ -413,110 +417,28 @@ IRL_PerspectiveWarp
 
 [Composite Nodes]
 #마스크를 연결하지 않으면 이미지 위 혹은 밑에 겹침이미지가 나오는 식으로 처리.
-
-#마스크 연결기능 추가 및 마스크 적용처리방식 추가했습니다.
-
 #마스크는 옵션연결이라 직접 연결안하면 관련옵션은 작동되지 않습니다.
+IRL_ImageBlend, IRL_ImageOverlay, IRL_ImageAdd, IRL_ImageMultiply, IRL_ImageDifference는 콤포짓 노드 하나로 통합되었습니다.
 
-IRL_ImageBlend
+IRL_Imagecomposite
 
-- node_id: IRL_ImageBlend
+- node_id: IRL_Imagecomposite
 
-- display_name:이미지 블렌드
+- display_name:이미지 합성(통합)
 
 - category: IRL_Composite
 
-- 역할: 두 이미지 선형 블렌딩
+- 역할: 두 이미지를 선택한 방식에 맞게 처리합니다.
 
-- Inputs: image_a, image_b, factor
+- Inputs: image_a, image_b, factor, priority, saturation
 
 - Inputs(option):Mask
+
+- Inputs:blend_mode : 합성 스타일을 정합니다.
 
 - Inputs(option):Mask_mode 마스크를 스프레이 스타일로 처리할지의 여부를 정합니다.
 
 - Outputs: image
-
-
-
-IRL_ImageOverlay
-
-- node_id: IRL_ImageOverlay
-
-- display_name:이미지 오버레이
-
-- category: IRL_Composite
-
-- 역할: 오버레이 블렌딩
-
-- Inputs: image_a, image_b
-
-- Inputs(option):Mask
-
-- Inputs(option):Mask_mode 마스크를 스프레이 스타일로 처리할지의 여부를 정합니다.
-
-- Outputs: image
-
-
-
-IRL_ImageAdd
-
-- node_id: IRL_ImageAdd
-
-- display_name:이미지 더하기
-
-- category: IRL_Composite
-
-- 역할: 두 이미지 더하기
-
-- Inputs: image_a, image_b
-
-- Inputs(option):Mask
-
-- Inputs(option):Mask_mode 마스크를 스프레이 스타일로 처리할지의 여부를 정합니다.
-
-- Outputs: image
-
-
-
-IRL_ImageMultiply
-
-- node_id: IRL_ImageMultiply
-
-- display_name:이미지 곱하기
-
-- category: IRL_Composite
-
-- 역할: 두 이미지 곱하기
-
-- Inputs: image_a, image_b
-
-- Inputs(option):Mask
-
-- Inputs(option):Mask_mode 마스크를 스프레이 스타일로 처리할지의 여부를 정합니다.
-
-- Outputs: image
-
-
-
-IRL_ImageDifference
-
-- node_id: IRL_ImageDifference
-
-- display_name:이미지 차이
-
-- category: IRL_Composite
-
-- 역할: 두 이미지의 절대 차이 계산
-
-- Inputs: image_a, image_b
-
-- Inputs(option):Mask
-
-- Inputs(option):Mask_mode 마스크를 스프레이 스타일로 처리할지의 여부를 정합니다.
-
-- Outputs: image
-
-
 
 [Noise / Generation Nodes]
 
