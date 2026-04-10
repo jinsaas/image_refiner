@@ -546,6 +546,76 @@ def apply_noise_no_palette(arr_small, palete_mode, noise_style, palete_inject_va
 
     return apply_blend(arr_small, arr_small_masked, palete_mode, palete_inject_val, mask_bool_small_3c)
 
+def run_upscale_with_progress(upscale_model, in_img, tile=512, overlap=32):
+    tile = int(512 / 4)      # 128
+    overlap = int(32 / 4)      # 8
+
+    # numpy(H, W, C) → torch(N, C, H, W)
+    if isinstance(in_img, np.ndarray):
+        in_img = torch.from_numpy(in_img).float() / 255.0
+        in_img = in_img.permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+
+    steps = in_img.shape[0] * comfy.utils.get_tiled_scale_steps(
+        in_img.shape[3], in_img.shape[2], tile_x=tile, tile_y=tile, overlap=overlap
+    )
+    pbar = comfy.utils.ProgressBar(steps)
+
+    s = comfy.utils.tiled_scale(
+        in_img,
+        lambda a: upscale_model(a),
+        tile_x=tile,
+        tile_y=tile,
+        overlap=overlap,
+        upscale_amount=upscale_model.scale
+,
+        pbar=pbar
+    )
+    # numpy(H, W, C)
+    inpainted = s[0].permute(1, 2, 0).cpu().numpy()  # (H, W, C)
+    inpainted = (inpainted * 255).clip(0, 255).astype(np.uint8)
+
+    return inpainted
+
+def tiled_resize(arr, new_W, new_H, tile_size, overlap_size, interp=cv2.INTER_LANCZOS4):
+    H, W, C = arr.shape
+    out = np.zeros((new_H, new_W, C), dtype=np.uint8)
+
+    # tile loop
+    for y in range(0, H, tile_size - overlap_size):
+        for x in range(0, W, tile_size - overlap_size):
+            tile = arr[y:y+tile_size, x:x+tile_size]
+            # tile rescale
+            scale_y = new_H / H
+            scale_x = new_W / W
+            tile_resized = cv2.resize(tile, (int(tile.shape[1]*scale_x), int(tile.shape[0]*scale_y)), interpolation=interp)
+            # composite (overlap blends)
+            out_y = int(y * scale_y)
+            out_x = int(x * scale_x)
+            out[out_y:out_y+tile_resized.shape[0], out_x:out_x+tile_resized.shape[1]] = tile_resized
+    return out
+
+def adjust_sigma(base_sigma=0.15, strength=6):
+    # strength: 1~11
+    offset = strength - 6   # default:6
+    return base_sigma + (0.01 * offset)
+
+def apply_detail_enhance(img, strength):
+    # 기준치
+    base_sigma_s = 10
+    base_sigma_r = 0.15
+    offset = int(strength) - 6   # 1~11, default:6
+    sigma_s = base_sigma_s + (0.01 * offset)
+    sigma_r = base_sigma_r + (0.01 * offset)
+    return cv2.detailEnhance(img, sigma_s=sigma_s, sigma_r=sigma_r)
+
+def apply_edge_filter(img, strength):
+    # 기준치
+    base_sigma_s = 60
+    base_sigma_r = 0.4
+    offset = int(strength) - 6   # 1~11, default:6
+    sigma_s = base_sigma_s + (0.01 * offset)
+    sigma_r = base_sigma_r + (0.01 * offset)
+    return cv2.edgePreservingFilter(img, flags=1, sigma_s=sigma_s, sigma_r=sigma_r)
 
 #----------------------------------------
 # image Enhancer
@@ -581,7 +651,7 @@ class IRL_ColorTransfer(IO.ComfyNode):
         samp_lab = cv2.cvtColor(samp_arr, cv2.COLOR_RGB2LAB).astype(np.float32)
 
         # Reinhard Color Transfer
-        for i in range(3):  # L, a, b 채널
+        for i in range(3):  # L, a, b channels
             arr_mean, arr_std   = arr_lab[:,:,i].mean(), arr_lab[:,:,i].std()
             samp_mean, samp_std = samp_lab[:,:,i].mean(), samp_lab[:,:,i].std()
             arr_lab[:,:,i] = (arr_lab[:,:,i] - arr_mean) * (samp_std / (arr_std+1e-5)) + samp_mean
@@ -1484,8 +1554,6 @@ class IRL_AutoInpaint_CV(IO.ComfyNode):
                 IO.String.Input("line_color", default="#111111", tooltip="라인 색상 (HEX 코드)"),
                 IO.Combo.Input("line_mode", options=["basic", "thin", "normal", "bold"], default="basic", tooltip="라인 두께 선택: basic=기본, thin=가는 선, normal=보통, bold=굵은 선"),
                 IO.Combo.Input("line_blur", options=["basic", "off", "overlay"], default="basic", tooltip="라인 블러 처리여부: basic=기본, off=처리안함, overlay=라인을 이미지 위에 확실히 띄움"),
-                IO.Combo.Input("rescale_filter", options=["nearest", "cubic", "lanczos"], default="nearest",
-                                tooltip="스케일 보간 시 사용할 보간 필터: cubic=INTER_CUBIC, lanczos=INTER_LANCZOS4, nearest=INTER_NEAREST"),
                 IO.String.Input("seedset", default=0, tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 넣은 경우 고정시드로 취급됩니다."),
                 IO.Combo.Input("noise_style", options=["skipnoise", "blanknoise", "basic", "perlin", "white"], default="skipnoise", tooltip="노이즈 샘플링 방식 선택"),
                 IO.Combo.Input("noise_level", options=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"], default="0", 
@@ -1505,7 +1573,7 @@ class IRL_AutoInpaint_CV(IO.ComfyNode):
 
     @classmethod
     def execute(cls, image, mask=None, method="telea", strength=0.00, mask_set="off", mask_mode="off", inpaint_factor="1", re_sample_palete=None, palete_inject="0", palete_mode="off",
-                color_sen=0.00, color_sig=10, color_str=0.00, line_str=0.00, line_color="#111111", line_mode="basic", line_blur="basic", rescale_filter="nearest", seedset=0, noise_style="skipnoise",
+                color_sen=0.00, color_sig=10, color_str=0.00, line_str=0.00, line_color="#111111", line_mode="basic", line_blur="basic", seedset=0, noise_style="skipnoise",
                 noise_level="0", noise_del="off", device_set="cpu", contrast_str=1.00, light_balance=1.00, sharpen_str=0.00) -> IO.NodeOutput:
 
                     
@@ -1548,11 +1616,10 @@ class IRL_AutoInpaint_CV(IO.ComfyNode):
         # --- palette ---
         use_palette = (re_sample_palete is not None and palete_mode != "off")
         palete_inject_val = max(0.0, min(int(palete_inject) * 0.05, 0.70))
-        
+
         if use_palette:
             pal_arr = ensure_image_tensor(re_sample_palete)[0].permute(1,2,0).cpu().numpy()
             pal_arr = (pal_arr * 255).clip(0,255).astype(np.uint8)
-
 
         # --- Seed & Noise ---
         parsed_seed = par_seed(seedset)
@@ -1560,35 +1627,29 @@ class IRL_AutoInpaint_CV(IO.ComfyNode):
         base_seed = random.randint(1, 2**31 - 1) if parsed_seed == 0 else parsed_seed
         rng = np.random.default_rng(base_seed)
 
-        small_H, small_W = max(64, H // 2), max(64, W // 2)
-        arr_small = cv2.resize(arr, (small_W, small_H))
-        mask_small = cv2.resize(mask_arr, (small_W, small_H), interpolation=cv2.INTER_NEAREST)
-        mask_bool_small = mask_small.astype(bool)
-        mask_bool_small_3c = np.repeat(mask_bool_small[:, :, np.newaxis], 3, axis=2)
-
-        if use_palette and palete_inject_val > 0.0:
-            pal_arr_small = cv2.resize(pal_arr, (small_W, small_H))
-            arr_small = apply_noise_with_palette(arr_small, pal_arr_small,
-                                                 palete_mode, noise_style,
-                                                 palete_inject_val, inject_noise, noise_level, mask_bool_small_3c, rng)
-        else:
-            arr_small = apply_noise_no_palette(arr_small,
-                                               palete_mode, noise_style,
-                                               palete_inject_val, inject_noise, noise_level, mask_bool_small_3c, rng)
-
         # --- Inpaint ---
-        inpaint_factor= max(0.00, min(strength, 1.00))
+        inpaint_factor = max(0.00, min(strength, 1.00))
         factor = int(inpaint_factor)/10
         radius = int(strength * factor)
 
         if radius > 0:
             flag = cv2.INPAINT_TELEA if method == "telea" else cv2.INPAINT_NS
-            inpaint_small = cv2.inpaint(arr_small, mask_small.astype(np.uint8), radius, flag)
+            inpainted = cv2.inpaint(arr, mask_arr.astype(np.uint8), radius, flag)
         else:
-            inpaint_small = arr_small
+            inpainted = arr
 
-        interp = cv2.INTER_CUBIC if rescale_filter=="cubic" else cv2.INTER_LANCZOS4 if rescale_filter=="lanczos" else cv2.INTER_NEAREST
-        inpainted = cv2.resize(inpaint_small, (W, H), interpolation=interp)
+        mask_bool = mask_arr.astype(bool)
+        mask_bool_3c = np.repeat(mask_bool[:, :, np.newaxis], 3, axis=2)
+
+        if use_palette and palete_inject_val > 0.0:
+            pal_arr = cv2.resize(pal_arr, (W, H))
+            arr = apply_noise_with_palette(arr, pal_arr, palete_mode, noise_style,
+                                           palete_inject_val, inject_noise,
+                                           noise_level, mask_bool_3c, rng)
+        else:
+            arr = apply_noise_no_palette(arr, palete_mode, noise_style,
+                                         palete_inject_val, inject_noise,
+                                         noise_level, mask_bool_3c, rng)
 
         # --- Noise Removal ---
         if noise_del == "gaussian":
@@ -1717,7 +1778,6 @@ class IRL_ResamplerInpaint(IO.ComfyNode):
                 IO.Int.Input("latent_size_x", default=512, min=8, max=2048),
                 IO.Int.Input("latent_size_y", default=512, min=8, max=2048),
                 IO.Int.Input("latent_batch", default=1, min=1, max=10),
-
                 IO.String.Input("pos_text", multiline=True, default="illustration style, global illumination, sharp focus, vivid colors, color balanced",
                                 tooltip="긍정 프롬프트"),
                 IO.String.Input("neg_text", multiline=True, default="text, watermark, (bad anatomy:0.3), (extra limbs:0.3), (blur:0.5), (desaturated:0.5)",
@@ -1979,11 +2039,119 @@ class IRL_ResamplerInpaint(IO.ComfyNode):
 
         return IO.NodeOutput(inpaint)
 
-
-
-
-        
 #----------------------------------------
+
+
+class IRL_rescaler(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="IRL_rescaler",
+            display_name="리스케일러",
+            category="이미지 리파이너/인페인팅",
+            description="다운스케일 후 리스케일을 시도해서 위화감을 줄여보려는 실험 노드.\n"
+                        "입력되는 이미지의 높이/폭은 짝수여야 합니다.",
+            inputs=[
+                IO.Image.Input("image", tooltip="대상 이미지"),
+                IO.UpscaleModel.Input("upscale_model", tooltip="참고 업스케일 모델", optional=True),
+                IO.Combo.Input("method", options=["telea", "fmm"], default="telea", tooltip="재처리 로직 세팅"),
+                IO.Combo.Input("tile_str", options=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"],
+                               default="0", tooltip="타일링 처리 설정.수치가 높을수록 처리강도가 낮아지고  블러처리가 늘어납니다."),
+                IO.Combo.Input("overlap_str", options=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+                               default="0", tooltip="겹침 처리 설정.수치가 높을수록 처리강도가 낮아지고 블러처리가 늘어납니다."),
+                IO.Combo.Input("rescale_mode", options=["off", "resize", "upscalemodel"], default="resize",
+                               tooltip="출력 스케일 처리 방식: off=리사이즈 안함, resize=기본 보간, upscalemodel=업스케일 모델 사용(업스케일 모델 사용시는 디테일강도, 엣지필터강도는 적용되지 않습니다."),
+                IO.Combo.Input("rescale_filter", options=["off", "nearest", "cubic", "lanczos"], default="off",
+                                tooltip="스케일 보간 시 사용할 보간 방법. 모델이 있을땐 작동하지 않습니다. 보간 필터: cubic=INTER_CUBIC, lanczos=INTER_LANCZOS4, nearest=INTER_NEAREST"),
+                IO.Combo.Input("detail_str", options=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+                               default="6", tooltip="디테일 강도 처리 설정.수치가 높을수록 처리강도가 낮아지고  블러처리가 늘어납니다. 모델이 있을땐 작동하지 않습니다."),
+                IO.Combo.Input("edgeFilter_str", options=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+                               default="6", tooltip="엣지필터 처리 설정.수치가 높을수록 처리강도가 낮아지고  블러처리가 늘어납니다. 모델이 있을땐 작동하지 않습니다."),
+                IO.Combo.Input("resize_factor", options=["0", "1", "2", "3", "4"], default="0", tooltip="출력 크기 조정: 0=조정 없음, 1=2배, 2=4배, 3=6배, 4=8배"),
+                IO.Combo.Input("device_set", options=["cpu", "nvidia", "amd"], default="cpu", tooltip="실행 장치"),
+            ],
+            outputs=[IO.Image.Output("image")]
+        )
+
+    @classmethod
+    def execute(cls, image, upscale_model=None, method="telea", tile_str="0", overlap_str="0", rescale_mode="off", rescale_filter="off", detail_str="6", edgeFilter_str="6", resize_factor="0", device_set="cpu") -> IO.NodeOutput:
+
+                    
+        # --- Select Device --- 
+
+        if device_set == "cpu":
+            device = "cpu"
+        elif device_set == "nvidia":
+            device = "cuda"
+        elif device_set == "amd":
+            if torch.cuda.is_available() and torch.version.hip:
+                props = torch.cuda.get_device_properties(0)
+                arch = getattr(props, "gcnArchName", "")
+                print("AMD arch:", arch, "ROCm version:", torch.version.hip)
+
+                device = "rocm"
+            else:
+                device = "cpu"
+        else:
+            device = "cpu"
+        
+        # --- Image to numpy ---
+        arr = ensure_image_tensor(image)
+        H, W = arr.shape[2:]
+        arr = arr[0].permute(1,2,0).cpu().numpy()
+        arr = (arr * 255).clip(0,255).astype(np.uint8)
+
+        # downscale
+
+        small_H, small_W = max(64, H // 2), max(64, W // 2)
+        arr_small = cv2.resize(arr, (small_W, small_H), interpolation=cv2.INTER_AREA)
+
+        # rescale factor
+        tile_val = int(tile_str)
+        tile_size = 1 if tile_val == 0 else tile_val * 4
+        
+        overlap_val = int(overlap_str)
+        overlap_size = overlap_val * 2
+
+
+
+        # rescale
+        if rescale_mode == "upscalemodel" and upscale_model is not None:
+            inpainted = run_upscale_with_progress(upscale_model, arr_small, tile=int(512 * tile_size), overlap=int(32 * overlap_size))
+
+        elif rescale_mode == "resize":
+            interp = cv2.INTER_CUBIC if rescale_filter=="cubic" else \
+                     cv2.INTER_LANCZOS4 if rescale_filter=="lanczos" else \
+                     cv2.INTER_NEAREST
+            inpainted = tiled_resize(arr_small, W, H, tile_size=int(512 * tile_size), overlap_size=int(32 * overlap_size), interp=interp)
+
+            inpainted = apply_detail_enhance(inpainted, detail_str)
+
+            inpainted = apply_edge_filter(inpainted, edgeFilter_str)
+
+        else:
+            inpainted = arr
+
+        # after resize
+        resize_val = int(resize_factor)
+        if resize_val > 0:
+            scale = resize_val * 2   # 1→2, 2→4, 3→6, 4→8
+            new_H, new_W = H * scale, W * scale
+            inpainted = cv2.resize(inpainted, (new_W, new_H), interpolation=cv2.INTER_LANCZOS4)
+
+        del arr
+        del arr_small
+        gc.collect()
+
+        inpaint=to_tensor_output(inpainted)
+        del inpainted
+        gc.collect()
+
+        return IO.NodeOutput(inpaint)
+
+#----------------------------------------
+
+
 SAMPLING_NODE_CLASS_MAPPINGS = {
     "IRL_ColorTransfer": IRL_ColorTransfer,
     "IRL_ImgDetailer": IRL_ImgDetailer,
@@ -1991,7 +2159,8 @@ SAMPLING_NODE_CLASS_MAPPINGS = {
     "IRL_ImgResamplerMix": IRL_ImgResamplerMix,
     "IRL_ImgResamplerAnd": IRL_ImgResamplerAnd,
     "IRL_AutoInpaint_CV": IRL_AutoInpaint_CV,
-    "IRL_ResamplerInpaint": IRL_ResamplerInpaint,    
+    "IRL_ResamplerInpaint": IRL_ResamplerInpaint,
+    "IRL_rescaler": IRL_rescaler,
 }
 
 SAMPLING_NODE_DISPLAY_NAME_MAPPINGS = {
@@ -2002,6 +2171,7 @@ SAMPLING_NODE_DISPLAY_NAME_MAPPINGS = {
     "IRL_ImgResamplerAnd": "이미지 리샘플러(로라로딩)",
     "IRL_AutoInpaint_CV": "CV 오토 인페인팅",
     "IRL_ResamplerInpaint": "리샘플러 세미오토 인페인팅",
+    "IRL_rescaler": "리스케일러",
 }
 
 #----------------------------------------
