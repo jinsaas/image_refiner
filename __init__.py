@@ -1,6 +1,6 @@
 import logging
 
-__version__ = "2.3.4"
+__version__ = "2.3.6"
 logging.info(f"### Loading: ComfyUI_IR_Lite (v{__version__})")
 
 from .Pac.IRL_adjustments import (
