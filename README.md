@@ -149,7 +149,6 @@ IRL_ShadowsHighlights
 
 - Outputs: image
 
-#신규 노드#
 
 IRL_ColorTransfer
 
@@ -166,6 +165,7 @@ IRL_ColorTransfer
 - Outputs: image
 
 #노드 기능 추가#
+
 IRL_ImgDetailer
 
 - node_id: IRL_ImgDetailer
@@ -181,7 +181,6 @@ IRL_ImgDetailer
 - Outputs: image
 
 
-디폴트 값 안정화
 IRL_ImgResampler
 
 - node_id: IRL_ImgResampler
@@ -196,7 +195,7 @@ IRL_ImgResampler
 
 - Outputs: image
 
-디폴트 값 안정화
+
 IRL_ImgResampler
 
 - node_id: IRL_ImgResampler
@@ -211,7 +210,7 @@ IRL_ImgResampler
 
 - Outputs: image
 
-기능 분할
+
 IRL_ImgResamplerMix
 
 - node_id: IRL_ImgResamplerMix
@@ -226,7 +225,7 @@ IRL_ImgResamplerMix
 
 - Outputs: image
 
-로라 로드 처리 가능
+
 IRL_ImgResamplerAnd
 
 - node_id: IRL_ImgResamplerAnd
@@ -241,20 +240,21 @@ IRL_ImgResamplerAnd
 
 - Outputs: image
 
-IRL_AutoInpaint_CV
 
+IRL_AutoInpaint_CV
+#버그 수정. 계단화 현상 제거.
 - node_id: IRL_AutoInpaint_CV
 
 - display_name: CV 오토 인페인팅
 
-- category: IRL_Adjustments
+- category: IRL_inpaint
 
 - 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
 
 - Inputs: image, 마스크, 팔레트 이미지, 노이즈세팅, 색상강조 슬라이더, 채도강화, 라인강조 슬라이더, 샤프닝, 라이트밸런스, 대비강화
 
 - Outputs: image
-- 
+
 
 IRL_ResamplerInpaint
 
@@ -267,6 +267,20 @@ IRL_ResamplerInpaint
 - 역할: 이미지 재처리를 통해 품질 향상을 시도합니다.
 
 - Inputs: image, 마스크, 팔레트 이미지, 노이즈세팅, 색상강조 슬라이더,  채도강화, 라인강조 슬라이더, 샤프닝, 라이트밸런스, 대비강화
+
+- Outputs: image
+
+IRL_rescaler
+#신규노드
+- node_id: IRL_rescaler
+
+- display_name: 리스케일러
+
+- category: IRL_inpaint
+
+- 역할: 다운스케일 후 리스케일을 시도해서 품질 향상을 시도합니다.
+
+- Inputs: image, 재처리로직, 업스케일러모델 인풋(옵션), 타일링 업스케일 보간(모델 사용시에는 모델위주로 처리), 엣지보간(모델 사용시에는 모델위주로 처리)
 
 - Outputs: image
 
