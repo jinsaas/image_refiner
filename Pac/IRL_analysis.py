@@ -1,25 +1,22 @@
 # -------------------------------
-# IR Lite — Analysis Node
-# (LOCALE-based multilingual description support included)
+# IR Lite — Filters Nodes
 # -------------------------------
 
-import torch
 import numpy as np
+import torch
 import cv2
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+from skimage import exposure
 
-# ComfyUI 최신 API
 from comfy_api.latest import IO, UI
-import matplotlib.pyplot as plt
-from io import BytesIO
 
+# ---------------------------------------
+# Header Utils
+#----------------------------------------
 
-# -------------------------------
-
-# 공통 유틸 함수 (헤더에 배치)
 def to_tensor_output(canvas: Image.Image):
     arr = np.array(canvas).astype(np.float32) / 255.0
-    arr = arr[None, ...]  # batch 차원 추가
+    arr = arr[None, ...]
     return torch.from_numpy(arr)
 
 def to_numpy_image(image):
@@ -39,7 +36,7 @@ def to_numpy_image(image):
 
 def to_tensor_mask(mask: Image.Image):
     arr = np.array(mask).astype(np.float32) / 255.0
-    arr = arr[None, ..., None]  # batch + 채널 차원
+    arr = arr[None, ..., None]
     return torch.from_numpy(arr)
 
 def to_numpy_mask(mask):
@@ -59,345 +56,161 @@ def to_numpy_mask(mask):
 
 # -------------------------------
 
-class IRL_RGBSplit(IO.ComfyNode):
+class IRL_GaussianBlur(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
         return IO.Schema(
-            node_id="IRL_RGBSplit",
-            display_name="이미지 3채널 색상 분리",
-            description="이미지의 RGB 채널을 분리하여 출력합니다.",
+            node_id="IRL_GaussianBlur",
+            display_name="가우시안 블러",
+            description="커널 크기와 시그마 값을 사용하여 이미지에 가우시안 블러를 적용합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="이미지 채널을 분리할 이미지"),
+                IO.Image.Input("image", tooltip="블러를 적용할 이미지"),
+                IO.Int.Input("kernel_size", default=3, min=1, max=99, tooltip="블러 커널의 크기"),
+                IO.Float.Input("sigma", default=1.00, min=0.00, max=200.00, step=0.01, tooltip="가우시안 블러의 시그마 값"),
             ],
             outputs=[
-                IO.Image.Output("red", tooltip="적색 채널 이미지"),
-                IO.Image.Output("green", tooltip="녹색 채널 이미지"),
-                IO.Image.Output("blue", tooltip="청색 채널 이미지"),
+                IO.Image.Output("image", tooltip="블러가 적용된 이미지"),
             ],
-            category="이미지 리파이너/분석"
+            category="이미지 리파이너/필터"
         )
 
     @classmethod
-    def execute(cls, image) -> IO.NodeOutput:
+    def execute(cls, image, kernel_size, sigma) -> IO.NodeOutput:
         arr = to_numpy_image(image)
-
-        # 채널별 추출
-        red   = np.zeros_like(arr); red[...,0] = arr[...,0]
-        green = np.zeros_like(arr); green[...,1] = arr[...,1]
-        blue  = np.zeros_like(arr); blue[...,2] = arr[...,2]
-
-        # PIL 변환
-        img_r = Image.fromarray(red)
-        img_g = Image.fromarray(green)
-        img_b = Image.fromarray(blue)
-
-        return IO.NodeOutput(
-            to_tensor_output(img_r),
-            to_tensor_output(img_g),
-            to_tensor_output(img_b)
-        )
-# -------------------------------
-
-class IRL_HistogramPlot(IO.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="IRL_HistogramPlot",
-            display_name="이미지 히스토그램 그래프",
-            description="이미지의 RGB 채널을 분리하여 히스토그램 그래프 형태로 출력합니다.",
-            inputs=[
-                IO.Image.Input("image", tooltip="히스토그램을 계산할 이미지"),
-            ],
-            outputs=[
-                IO.Image.Output("histogram", tooltip="RGB 히스토그램 그래프 출력"),
-            ],
-            category="이미지 리파이너/분석"
-        )
-
-    @classmethod
-    def execute(cls, image) -> IO.NodeOutput:
-        arr = to_numpy_image(image)
-
-        # 채널별 히스토그램 계산
-        r_hist = np.histogram(arr[...,0], bins=256, range=(0,255))[0]
-        g_hist = np.histogram(arr[...,1], bins=256, range=(0,255))[0]
-        b_hist = np.histogram(arr[...,2], bins=256, range=(0,255))[0]
-
-        # 그래프 그리기
-        plt.figure(figsize=(6,4))
-        plt.plot(r_hist, color="red", label="Red")
-        plt.plot(g_hist, color="green", label="Green")
-        plt.plot(b_hist, color="blue", label="Blue")
-        plt.legend()
-        plt.title("RGB Histogram")
-        plt.xlabel("Pixel value")
-        plt.ylabel("Frequency")
-
-        # 이미지로 변환
-        buf = BytesIO()
-        plt.savefig(buf, format="PNG")
-        plt.close()
-        buf.seek(0)
-        img = Image.open(buf).convert("RGB")
-
-        return IO.NodeOutput(to_tensor_output(img))
-
-
-# -------------------------------
-class IRL_ImageMeanStd(IO.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="IRL_ImageMeanStd",
-            display_name="이미지 평균 & 표준편차",
-            description="이미지 픽셀값의 평균값과 표준편차를 계산합니다.",
-            inputs=[
-                IO.Image.Input("image", tooltip="분석할 이미지"),
-                IO.Int.Input("font_size", default=48, min=30, max=54, tooltip="폰트 크기 (30~54)"),
-            ],
-            outputs=[
-                IO.Image.Output("image", tooltip="평균과 표준편차가 표시된 이미지"),
-            ],
-            category="이미지 리파이너/분석"
-        )
-
-    @classmethod
-    def execute(cls, image, font_size=48) -> IO.NodeOutput:
-        arr = to_numpy_image(image)
-        gray = 0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2] if arr.ndim == 3 else arr
-        mean_value, std_value = float(gray.mean()), float(gray.std())
-
-        # 캔버스에 텍스트 표시
-        canvas = Image.new("RGB", (512, 256), "black")
-
-        draw = ImageDraw.Draw(canvas)
-        # Arial 폰트, 크기 48
-        font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", font_size)
-
-        draw.text((10, 40), f"MEAN: {mean_value:.4f}", fill=(255, 255, 0), font=font)
-        draw.text((10, 140), f"STD:  {std_value:.4f}", fill=(255, 255, 0), font=font)
-
-        return IO.NodeOutput(to_tensor_output(canvas))
-
-# -------------------------------
-class IRL_ImageMinMax(IO.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="IRL_ImageMinMax",
-            display_name="이미지 최소 & 최대",
-            description="이미지 픽셀값의 최소값과 최대값을 계산합니다.",
-            inputs=[
-                IO.Image.Input("image", tooltip="분석할 이미지"),
-                IO.Int.Input("font_size", default=48, min=30, max=54, tooltip="폰트 크기 (30~54)"),
-            ],
-            outputs=[
-                IO.Image.Output("image", tooltip="최소/최대값이 표시된 이미지"),
-            ],
-            category="이미지 리파이너/분석"
-        )
-
-    @classmethod
-    def execute(cls, image, font_size=48) -> IO.NodeOutput:
-        arr = to_numpy_image(image)
-        gray = 0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2] if arr.ndim == 3 else arr
-        min_value, max_value = float(gray.min()), float(gray.max())
-
-        # 큰 캔버스에 바로 텍스트 표시
-        canvas = Image.new("RGB", (512, 256), "black")
-        draw = ImageDraw.Draw(canvas)
-
-        # 폰트 크기 적용
-        font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", font_size)
-
-        draw.text((10, 40), f"MIN: {min_value:.4f}", fill=(255, 255, 0), font=font)
-        draw.text((10, 140), f"MAX: {max_value:.4f}", fill=(255, 255, 0), font=font)
-
-        return IO.NodeOutput(to_tensor_output(canvas))
-
-
-# -------------------------------
-
-class IRL_ImageEdgeMap(IO.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return IO.Schema(
-            node_id="IRL_ImageEdgeMap",
-            display_name="이미지 에지 맵",
-            description="소벨 연산자를 사용하여 이미지의 에지 맵을 생성합니다.",
-            inputs=[
-                IO.Image.Input("image", tooltip="엣지맵을 추출할 이미지"),
-                IO.Float.Input("edge_scale", default=1.0, min=0.1, max=5.0, step=0.1, tooltip="엣지 강도 스케일")
-            ],
-            outputs=[
-                IO.Image.Output("image", tooltip="엣지 맵 이미지"),
-            ],
-            category="이미지 리파이너/분석"
-        )
-
-    @classmethod
-    def execute(cls, image, edge_scale=1.0) -> IO.NodeOutput:
-        arr = to_numpy_image(image)
-        h, w = arr.shape[:2]
-
-        gray = 0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2] if arr.ndim == 3 else arr
-        gray = gray.astype(np.uint8)
-
-        # Sobel 연산
-        sobel_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0)
-        sobel_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1)
-        edge = np.sqrt(sobel_x**2 + sobel_y**2)
-        
-        # 강도 스케일링 적용
-        edge = edge / edge.max() * 255
-        edge = edge * edge_scale
-        
-        edge = np.clip(edge, 0, 255).astype(np.uint8)
-        canvas = Image.fromarray(edge)
-
-        return IO.NodeOutput(to_tensor_output(canvas))
+        k = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
+        blurred = cv2.GaussianBlur(arr, (k, k), sigma)
+        return IO.NodeOutput(to_tensor_output(Image.fromarray(blurred)))
         
 # -------------------------------
 
-class IRL_ImageBrightnessContrast(IO.ComfyNode):
+class IRL_MedianBlur(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
         return IO.Schema(
-            node_id="IRL_ImageBrightnessContrast",
-            display_name="밝기 & 대비",
-            description="이미지의 밝기와 대비를 계산합니다.",
+            node_id="IRL_MedianBlur",
+            display_name="미디언 블러",
+            description="커널 크기를 사용하여 이미지에 미디언 블러를 적용합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="분석할 이미지"),
-                IO.Int.Input("font_size", default=48, min=30, max=54, tooltip="폰트 크기 (30~54)"),
+                IO.Image.Input("image", tooltip="블러를 적용할 이미지"),
+                IO.Int.Input("kernel_size", default=3, min=1, max=99, tooltip="미디언 블러 커널의 크기"),
             ],
             outputs=[
-                IO.Image.Output("image", tooltip="밝기값과 대비값이 표시된 이미지"),
+                IO.Image.Output("image", tooltip="블러가 적용된 이미지"),
             ],
-            category="이미지 리파이너/분석"
+            category="이미지 리파이너/필터"
         )
 
     @classmethod
-    def execute(cls, image, font_size=48) -> IO.NodeOutput:
+    def execute(cls, image, kernel_size) -> IO.NodeOutput:
         arr = to_numpy_image(image)
-        gray = 0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2] if arr.ndim == 3 else arr
-        brightness_value, contrast_value = float(gray.mean()), float(gray.std())
-
-        # 큰 캔버스에 바로 텍스트 표시
-        canvas = Image.new("RGB", (512, 256), "black")
-        draw = ImageDraw.Draw(canvas)
-
-        # 폰트 크기 적용
-        font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", font_size)
-
-        draw.text((10, 40), f"Brightness: {brightness_value:.4f}", fill=(255, 255, 0), font=font)
-        draw.text((10, 140), f"Contrast:   {contrast_value:.4f}", fill=(255, 255, 0), font=font)
-
-        return IO.NodeOutput(to_tensor_output(canvas))
-
-
+        k = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
+        blurred = cv2.medianBlur(arr, k)
+        return IO.NodeOutput(to_tensor_output(Image.fromarray(blurred)))
 
 # -------------------------------
-class IRL_CannyEdgeStats(IO.ComfyNode):
+
+class IRL_BilateralFilter(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
         return IO.Schema(
-            node_id="IRL_CannyEdgeStats",
-            display_name="캐니 에지 통계",
-            description="캐니 에지 검출을 통해 에지 밀도와 평균을 계산합니다.",
+            node_id="IRL_BilateralFilter",
+            display_name="양방향 필터",
+            description="지름과 시그마 값을 사용하여 이미지에 양방향 필터를 적용합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="케니 엣지를 검출해 분석할 이미지"),
-                IO.Int.Input("font_size", default=40, min=30, max=40, tooltip="폰트 크기 (30~54)"),
+                IO.Image.Input("image", tooltip="필터를 적용할 이미지"),
+                IO.Int.Input("diameter", default=9, min=1, max=50, tooltip="필터 커널의 지름"),
+                IO.Float.Input("sigma_color", default=75.0, min=0.0, max=200.0, step=1.0, tooltip="색상 공간에서의 시그마 값"),
+                IO.Float.Input("sigma_space", default=75.0, min=0.0, max=200.0, step=1.0, tooltip="좌표 공간에서의 시그마 값"),
             ],
             outputs=[
-                IO.Image.Output("image", tooltip="케니엣지 밀도와 평균통계가 표시된 이미지"),
+                IO.Image.Output("image", tooltip="필터가 적용된 이미지"),
             ],
-            category="이미지 리파이너/분석"
+            category="이미지 리파이너/필터"
         )
 
     @classmethod
-    def execute(cls, image, font_size=40) -> IO.NodeOutput:
+    def execute(cls, image, diameter, sigma_color, sigma_space) -> IO.NodeOutput:
         arr = to_numpy_image(image)
-        gray = (0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2]).astype(np.uint8) if arr.ndim == 3 else arr.astype(np.uint8)
-
-        # Canny edge detection
-        edges = cv2.Canny(gray, 100, 200).astype(np.float32)
-        edge_density = float((edges > 0).mean())
-        edge_mean = float(edges.mean() / 255.0)
-
-        # 큰 캔버스에 바로 텍스트 표시
-        canvas = Image.new("RGB", (512, 256), "black")
-        draw = ImageDraw.Draw(canvas)
-
-        # 폰트 크기 적용
-        font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", font_size)
-
-        draw.text((10, 40), f"EDGE_DENSITY: {edge_density:.4f}", fill=(255, 255, 0), font=font)
-        draw.text((10, 140), f"EDGE_MEAN:    {edge_mean:.4f}", fill=(255, 255, 0), font=font)
-
-        return IO.NodeOutput(to_tensor_output(canvas))
-
+        filtered = cv2.bilateralFilter(arr, diameter, sigma_color, sigma_space)
+        return IO.NodeOutput(to_tensor_output(Image.fromarray(filtered)))
 
 # -------------------------------
-
-class IRL_DepthStats(IO.ComfyNode):
+class IRL_Sharpen(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
         return IO.Schema(
-            node_id="IRL_DepthStats",
-            display_name="깊이 통계",
-            description="이미지의 깊이 평균과 표준편차를 계산합니다.",
+            node_id="IRL_Sharpen",
+            display_name="샤픈",
+            description="조정 가능한 양으로 이미지를 선명하게 합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="뎁스 평균값과 표준편차를 분석할 이미지"),
-                IO.Int.Input("font_size", default=40, min=30, max=40, tooltip="폰트 크기 (30~54)"),
+                IO.Image.Input("image", tooltip="샤픈을 적용할 이미지"),
+                IO.Float.Input("amount", default=0.000, min=0.000, max=2.000, step=0.001, tooltip="샤픈 효과의 강도"),
             ],
             outputs=[
-                IO.Image.Output("image", tooltip="뎁스 평균값과 표준편차 통계가 표시된 이미지"),
+                IO.Image.Output("image", tooltip="샤픈이 적용된 이미지"),
             ],
-            category="이미지 리파이너/분석"
+            category="이미지 리파이너/필터"
         )
 
     @classmethod
-    def execute(cls, image, font_size=40) -> IO.NodeOutput:
-        arr = to_numpy_image(image)
-        gray = 0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2] if arr.ndim == 3 else arr
-        arr = gray.astype(np.float32) / 255.0
-        depth_mean, depth_std = float(arr.mean()), float(arr.std())
+    def execute(cls, image, amount) -> IO.NodeOutput:
+        arr = to_numpy_image(image).astype(np.float32)
 
-        # 큰 캔버스에 바로 텍스트 표시
-        canvas = Image.new("RGB", (512, 256), "black")
-        draw = ImageDraw.Draw(canvas)
+        blurred = cv2.GaussianBlur(arr, (0, 0), sigmaX=3)
+        sharpened = cv2.addWeighted(arr, 1 + amount, blurred, -amount, 0)
 
-        # 폰트 크기 적용
-        font = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", font_size)
+        sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
 
-        draw.text((10, 40), f"DEPTH_MEAN: {depth_mean:.4f}", fill=(255, 255, 0), font=font)
-        draw.text((10, 140), f"DEPTH_STD:  {depth_std:.4f}", fill=(255, 255, 0), font=font)
-
-        return IO.NodeOutput(to_tensor_output(canvas))
-
+        return IO.NodeOutput(to_tensor_output(Image.fromarray(sharpened)))
 
 # -------------------------------
+class IRL_HighPass(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="IRL_HighPass",
+            display_name="하이패스 필터",
+            description="에지와 세부 사항을 강조하기 위해 하이패스 필터를 적용합니다.",
+            inputs=[
+                IO.Image.Input("image", tooltip="필터를 적용할 이미지"),
+                IO.Int.Input("radius", default=3, min=0, max=31, tooltip="하이패스 필터의 반경"),
+            ],
+            outputs=[
+                IO.Image.Output("image", tooltip="하이패스 필터가 적용된 이미지"),
+            ],
+            category="이미지 리파이너/필터"
+        )
 
-ANALYSIS_NODE_CLASS_MAPPINGS = {
-    "IRL_RGBSplit": IRL_RGBSplit,
-    "IRL_HistogramPlot": IRL_HistogramPlot,
-    "IRL_ImageMeanStd": IRL_ImageMeanStd,
-    "IRL_ImageMinMax": IRL_ImageMinMax,
-    "IRL_ImageEdgeMap": IRL_ImageEdgeMap,
-    "IRL_ImageBrightnessContrast": IRL_ImageBrightnessContrast,
-    "IRL_CannyEdgeStats": IRL_CannyEdgeStats,
-    "IRL_DepthStats": IRL_DepthStats,
+    @classmethod
+    def execute(cls, image, radius) -> IO.NodeOutput:
+        arr = to_numpy_image(image).astype(np.float32)
+        if radius <= 0:
+            return IO.NodeOutput(image)
+
+        k = radius if radius % 2 == 1 else radius + 1
+
+        blurred = cv2.GaussianBlur(arr, (k, k), 0)
+        highpass = arr - blurred + 128
+        highpass = np.clip(highpass, 0, 255).astype(np.uint8)
+
+        return IO.NodeOutput(to_tensor_output(Image.fromarray(highpass)))
+        
+# -------------------------------
+
+FILTERS_NODE_CLASS_MAPPINGS = {
+    "IRL_GaussianBlur": IRL_GaussianBlur,
+    "IRL_MedianBlur": IRL_MedianBlur,
+    "IRL_BilateralFilter": IRL_BilateralFilter,
+    "IRL_Sharpen": IRL_Sharpen,
+    "IRL_HighPass": IRL_HighPass,
 }
 
-ANALYSIS_NODE_DISPLAY_NAME_MAPPINGS = {
-    "IRL_RGBSplit": "이미지 3채널 색상 분리",
-    "IRL_HistogramPlot": "이미지 히스토그램 그래프",
-    "IRL_ImageMeanStd": "이미지 평균 & 표준편차",
-    "IRL_ImageMinMax": "이미지 최소 & 최대",
-    "IRL_ImageEdgeMap": "이미지 에지 맵",
-    "IRL_ImageBrightnessContrast": "밝기 & 대비",
-    "IRL_CannyEdgeStats": "캐니 에지 통계",
-    "IRL_DepthStats": "깊이 통계",
+FILTERS_NODE_DISPLAY_NAME_MAPPINGS = {
+    "IRL_GaussianBlur": "가우시안 블러",
+    "IRL_MedianBlur": "미디언 블러",
+    "IRL_BilateralFilter": "양방향 필터",
+    "IRL_Sharpen": "샤픈",
+    "IRL_HighPass": "하이패스 필터",
 }
 
 # -------------------------------
