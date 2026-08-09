@@ -1,0 +1,13 @@
+Padding spacing=14px
+cut line=2px
+
+ex) 256x256 2cut[288x562(+274)]
+                           14px
+                          2px(line)
+14px(+line 2px)    256x256    14px(+line 2px)
+                          2px(line)
+                           14px
+                          2px(line)
+14px(+line 2px)    256x256    14px(+line 2px)
+                          2px(line)
+                           14px
