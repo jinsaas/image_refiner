@@ -1,21 +1,19 @@
 # -------------------------------
 # IR Lite — Filters Nodes
-# (LOCALE-based multilingual description support included)
 # -------------------------------
+
 import numpy as np
 import torch
 import cv2
 from PIL import Image, ImageDraw
 from skimage import exposure
 
-# ComfyUI 최신 API
 from comfy_api.latest import IO, UI
 
+# ---------------------------------------
+# Header Utils
+#----------------------------------------
 
-
-
-# -------------------------------
-# 공통 유틸 함수
 def to_tensor_output(canvas: Image.Image):
     arr = np.array(canvas).astype(np.float32) / 255.0
     arr = arr[None, ...]
@@ -158,7 +156,6 @@ class IRL_Sharpen(IO.ComfyNode):
     def execute(cls, image, amount) -> IO.NodeOutput:
         arr = to_numpy_image(image).astype(np.float32)
 
-        # 언샤프 마스크: 원본과 블러 이미지를 섞어서 샤픈
         blurred = cv2.GaussianBlur(arr, (0, 0), sigmaX=3)
         sharpened = cv2.addWeighted(arr, 1 + amount, blurred, -amount, 0)
 
