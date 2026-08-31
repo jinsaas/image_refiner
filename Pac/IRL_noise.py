@@ -835,9 +835,8 @@ class IRL_RGBColor(IO.ComfyNode):
         height = max(16, min(2048, height))
 
         base_color_tensor = torch.tensor([r_val, g_val, b_val], dtype=torch.float32) # [3]
-        
 
-        out_tensor = base_color_tensor.view(1, 3, 1, 1).expand(1, 3, height, width) # [1, C, H, W]
+        out_tensor = base_color_tensor.view(1, 1, 1, 3).expand(1, height, width, 3) # [1, H, W, C]
         if show_preview:
             result_rgb = to_tensor_output(out_tensor) 
             return IO.NodeOutput(out_tensor.contiguous(),ui=UI.PreviewImage(out_tensor))
