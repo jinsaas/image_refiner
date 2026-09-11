@@ -135,6 +135,7 @@ class IRL_BilateralFilter(IO.ComfyNode):
         return IO.NodeOutput(to_tensor_output(Image.fromarray(filtered)))
 
 # -------------------------------
+
 class IRL_Sharpen(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -164,6 +165,7 @@ class IRL_Sharpen(IO.ComfyNode):
         return IO.NodeOutput(to_tensor_output(Image.fromarray(sharpened)))
 
 # -------------------------------
+
 class IRL_HighPass(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
