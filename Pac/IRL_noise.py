@@ -30,7 +30,7 @@ class NoisePack(ComfyTypeIO):
     Type = str
 
 def par_seed(seed_str: str) -> int:
-    MAX_SEED = 2**31 - 1
+    MAX_SEED = 2**63 - 1
 
 
     if not seed_str:
@@ -40,11 +40,17 @@ def par_seed(seed_str: str) -> int:
         seed_val = int(seed_str)
         if 0 <= seed_val <= MAX_SEED:
             return seed_val
-
+        if seed_val < 0:
+            print(f"\n[Notice] The seed value ({seed_val}) is negative. It will be converted or clamped.")
+        else:
+            print(f"\n[Notice] The seed value exceeds MAX_SEED. It will be mapped via hash.")
+            
+        seed_str = str(seed_val)
         seed_str = str(seed_val)
     except (ValueError, TypeError):
         seed_str = str(seed_str)
 
+    print(f"\n [Notice] The seed value is not a number. It will be replaced with the text hash value: '{seed_str}'")
     hash_bytes = hashlib.sha256(seed_str.encode("utf-8")).digest()
     seed_val =  max(0, min(int.from_bytes(hash_bytes[:8], "big"), MAX_SEED))
     return seed_val
@@ -363,7 +369,7 @@ class IRL_AddGaussianNoise(IO.ComfyNode):
                 IO.Image.Input("image", tooltip="노이즈를 추가할 이미지"),
                 IO.Float.Input("sigma", default=10.0, min=0.0, max=255.0, step=0.1,
                                tooltip="가우시안 노이즈의 표준편차 (0~255 범위 권장)"),
-                IO.Int.Input("seedset", default=0, min=0, max=2**31 - 1, tooltip="0이면 랜덤, 숫자를 지정하면 고정된 노이즈 패턴 생성"),
+                IO.String.Input("seedset", default=0, tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 지정하면 고정된 노이즈 패턴 생성"),
                 IO.Boolean.Input("show_preview", default=False, tooltip="프리뷰 표시 여부"),
                 IO.Boolean.Input("clear_cache", default=False, tooltip="노드 시작시 캐시 정리")
             ],
@@ -396,7 +402,7 @@ class IRL_AddGaussianNoise(IO.ComfyNode):
 
         parsed_seed = par_seed(seedset)
         if parsed_seed == 0:
-            base_seed = int(np.random.default_rng().integers(1, 2**31 - 1))
+            base_seed = int(np.random.default_rng().integers(1, 2**63 - 1))
         else:
             base_seed = parsed_seed
 
@@ -428,7 +434,7 @@ class IRL_SaltPepperNoise(IO.ComfyNode):
                 IO.Image.Input("image", tooltip="노이즈를 추가할 이미지"),
                 IO.Float.Input("amount", default=0.010, min=0.000, max=1.000, step=0.001,
                                tooltip="노이즈의 비율 (0~1)"),
-                IO.Int.Input("seedset", default=0, min=0, max=2**31 - 1, tooltip="0이면 랜덤, 숫자를 지정하면 고정된 노이즈 패턴 생성"),
+                IO.String.Input("seedset", default=0, tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 지정하면 고정된 노이즈 패턴 생성"),
                 IO.Boolean.Input("show_preview", default=False, tooltip="프리뷰 표시 여부"),
                 IO.Boolean.Input("clear_cache", default=False, tooltip="노드 시작시 캐시 정리")
             ],
@@ -463,7 +469,7 @@ class IRL_SaltPepperNoise(IO.ComfyNode):
 
         parsed_seed = par_seed(seedset)
         if parsed_seed == 0:
-            base_seed = int(np.random.default_rng().integers(1, 2**31 - 1))
+            base_seed = int(np.random.default_rng().integers(1, 2**63 - 1))
         else:
             base_seed = parsed_seed
 
@@ -507,7 +513,7 @@ class IRL_PerlinNoise(IO.ComfyNode):
                 IO.Float.Input("scale", default=32.0, min=4.0, max=128.0, step=1.0, tooltip="노이즈 스케일 (패턴 크기 조절)"),
                 IO.Int.Input("octaves", default=4, min=1, max=8, tooltip="옥타브 수 (패턴 레이어 수)"),
                 IO.Float.Input("persistence", default=0.5, min=0.1, max=1.0, step=0.1, tooltip="옥타브별 세기 감소율"),
-                IO.Int.Input("seedset", default=0, min=0, max=2**31 - 1, tooltip="0이면 랜덤, 숫자를 지정하면 고정된 노이즈 패턴 생성"),
+                IO.String.Input("seedset", default=0, tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 지정하면 고정된 노이즈 패턴 생성"),
                 IO.Boolean.Input("show_preview", default=False, tooltip="프리뷰 표시 여부"),
                 IO.Boolean.Input("clear_cache", default=False, tooltip="노드 시작시 캐시 정리")
             ],
@@ -541,7 +547,7 @@ class IRL_PerlinNoise(IO.ComfyNode):
 
         parsed_seed = par_seed(seedset)
         if parsed_seed == 0:
-            base_seed = int(np.random.default_rng().integers(1, 2**31 - 1))
+            base_seed = int(np.random.default_rng().integers(1, 2**63 - 1))
         else:
             base_seed = parsed_seed
 
@@ -606,9 +612,8 @@ class IRL_PerlinNoise(IO.ComfyNode):
 
         out_tensor = torch.from_numpy(arr_rgb).float() / 255.0
         out_tensor = out_tensor.unsqueeze(0) # [1, H, W, C]
-        if show_preview:
-            result_rgb = to_tensor_output(out_tensor)  
-            return IO.NodeOutput(out_tensor,ui=UI.PreviewImage(result_rgb))
+        if show_preview:  
+            return IO.NodeOutput(out_tensor,ui=UI.PreviewImage(out_tensor))
         return IO.NodeOutput(out_tensor)
 
 
@@ -626,7 +631,7 @@ class IRL_RandomColor(IO.ComfyNode):
             inputs=[
                 IO.Int.Input("width", default=256, min=16, max=2048, tooltip="출력 이미지의 가로 크기"),
                 IO.Int.Input("height", default=256, min=16, max=2048, tooltip="출력 이미지의 세로 크기"),
-                IO.Int.Input("seedset", default=0, min=0, max=2**31 - 1, tooltip="0이면 랜덤, 숫자를 지정하면 고정된 노이즈 패턴 생성"),
+                IO.String.Input("seedset", default=0, tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 지정하면 고정된 노이즈 패턴 생성"),
                 IO.Boolean.Input("show_preview", default=False, tooltip="프리뷰 표시 여부"),
                 IO.Boolean.Input("clear_cache", default=False, tooltip="노드 시작시 캐시 정리")
             ],
@@ -657,7 +662,7 @@ class IRL_RandomColor(IO.ComfyNode):
 
         parsed_seed = par_seed(seedset)
         if parsed_seed == 0:
-            base_seed = int(np.random.default_rng().integers(1, 2**31 - 1))
+            base_seed = int(np.random.default_rng().integers(1, 2**63 - 1))
         else:
             base_seed = parsed_seed
 
@@ -668,7 +673,6 @@ class IRL_RandomColor(IO.ComfyNode):
         out_tensor = torch.from_numpy(arr).float() / 255.0
         out_tensor = out_tensor.unsqueeze(0)  # [1, H, W, C] 
         if show_preview:
-            result_rgb = to_tensor_output(out_tensor) 
             return IO.NodeOutput(out_tensor,ui=UI.PreviewImage(out_tensor))
         return IO.NodeOutput(out_tensor)
 
@@ -688,7 +692,7 @@ class IRL_WhiteNoise(IO.ComfyNode):
                 IO.Int.Input("width", default=256, min=16, max=2048, tooltip="출력 이미지의 가로 크기"),
                 IO.Int.Input("height", default=256, min=16, max=2048, tooltip="출력 이미지의 세로 크기"),
                 IO.Float.Input("scale", default=8.0, min=1.0, max=64.0, step=1.0, tooltip="노이즈 스케일 (패턴 크기 조절)"),
-                IO.Int.Input("seedset", default=0, min=0, max=2**31 - 1, tooltip="0이면 랜덤, 숫자를 지정하면 고정된 노이즈 패턴 생성"),
+                IO.String.Input("seedset", default=0, tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 지정하면 고정된 노이즈 패턴 생성"),
                 IO.Boolean.Input("show_preview", default=False, tooltip="프리뷰 표시 여부"),
                 IO.Boolean.Input("clear_cache", default=False, tooltip="노드 시작시 캐시 정리")
             ],
@@ -722,7 +726,7 @@ class IRL_WhiteNoise(IO.ComfyNode):
 
         parsed_seed = par_seed(seedset)
         if parsed_seed == 0:
-            base_seed = int(np.random.default_rng().integers(1, 2**31 - 1))
+            base_seed = int(np.random.default_rng().integers(1, 2**63 - 1))
         else:
             base_seed = parsed_seed
 
@@ -778,7 +782,6 @@ class IRL_WhiteNoise(IO.ComfyNode):
 
  
         if show_preview:
-            result_rgb = to_tensor_output(out_tensor) 
             return IO.NodeOutput(out_tensor,ui=UI.PreviewImage(out_tensor))
         return IO.NodeOutput(out_tensor)
 
@@ -838,7 +841,6 @@ class IRL_RGBColor(IO.ComfyNode):
 
         out_tensor = base_color_tensor.view(1, 1, 1, 3).expand(1, height, width, 3) # [1, H, W, C]
         if show_preview:
-            result_rgb = to_tensor_output(out_tensor) 
             return IO.NodeOutput(out_tensor.contiguous(),ui=UI.PreviewImage(out_tensor))
         return IO.NodeOutput(out_tensor.contiguous())
 
@@ -853,7 +855,7 @@ class IRL_NoiseCreator(IO.ComfyNode):
             description="시드 통제가 가능한 정밀 노이즈를 준비합니다.",
             inputs=[
                 IO.Combo.Input("noise_mode", options=["GaussianNoise", "SaltPepperNoise", "PerlinNoise", "RandomColor", "WhiteNoise", "generate_hybrid_texture_noise"], default="GaussianNoise"),
-                IO.Int.Input("seedset", default=0, min=0, max=2**31 - 1, tooltip="0이면 랜덤, 숫자를 지정하면 고정된 노이즈 패턴 생성"),
+                IO.String.Input("seedset", default=0, tooltip="노이즈 시드.0이면 랜덤 시드를 넣고, 시드넘버를 지정하면 고정된 노이즈 패턴 생성"),
                 IO.Boolean.Input("noise_switch", default=False, tooltip="샘플러가 받을수 있는 정보로서 시드와 노이즈 정보를 전달합니다."),
                 IO.Boolean.Input("show_preview", default=False, tooltip="프리뷰 표시 여부"),
                 IO.Boolean.Input("clear_cache", default=False, tooltip="노드 시작시 캐시 정리")
@@ -894,7 +896,7 @@ class IRL_NoiseCreator(IO.ComfyNode):
 
         parsed_seed = par_seed(seedset)
         if parsed_seed == 0:
-            base_seed = int(np.random.default_rng().integers(1, 2**31 - 1))
+            base_seed = int(np.random.default_rng().integers(1, 2**63 - 1))
         else:
             base_seed = parsed_seed
         print(f"\n{CYAN}{BOLD}[IRL_NoiseCreator]{RESET} Active Seed: {YELLOW}{BOLD}{base_seed}{RESET}")
