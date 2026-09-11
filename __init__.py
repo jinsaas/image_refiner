@@ -1,7 +1,9 @@
 import logging
 
-__version__ = "2.5.0"
+__version__ = "3.0.0"
 logging.info(f"### Loading: ComfyUI_IR_Lite (v{__version__})")
+
+WEB_DIRECTORY = "./web"
 
 from .Pac.IRL_adjustments import (
     ADJUSTMENTS_NODE_CLASS_MAPPINGS,
@@ -35,6 +37,7 @@ from .Pac.IRL_sampling import (
 
 
 
+# Merge class mappings
 NODE_CLASS_MAPPINGS = {
     **ADJUSTMENTS_NODE_CLASS_MAPPINGS,
     **FILTERS_NODE_CLASS_MAPPINGS,
@@ -46,6 +49,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 
+# Consolidate display name mappings
 NODE_DISPLAY_NAME_MAPPINGS = {
     **ADJUSTMENTS_NODE_DISPLAY_NAME_MAPPINGS,
     **FILTERS_NODE_DISPLAY_NAME_MAPPINGS,
