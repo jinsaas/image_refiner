@@ -112,6 +112,13 @@ def ensure_mask_tensor(t: torch.Tensor) -> torch.Tensor:
 
 def process_mask(mask, a, Mask_mode="normal"):
     m = ensure_mask_tensor(mask)  # (B,1,H,W)
+    target_h, target_w = a.shape[1], a.shape[2]
+    curr_h, curr_w = m.shape[2], m.shape[3]
+    if curr_h != target_h or curr_w != target_w:
+        if curr_h < target_h or curr_w < target_w:
+            m = F.interpolate(m, size=(target_h, target_w), mode="bilinear", align_corners=False)
+        elif curr_h > target_h or curr_w > target_w:
+            m = F.interpolate(m, size=(target_h, target_w), mode="area", align_corners=False)
 
     if Mask_mode == "Small_spread":
         m = F.max_pool2d(m, 3, stride=1, padding=1)
@@ -119,7 +126,13 @@ def process_mask(mask, a, Mask_mode="normal"):
         m = F.max_pool2d(m, 5, stride=1, padding=2)
     elif Mask_mode == "blur":
         m = gaussian_blur(m, kernel_size=5, sigma=2)
-        m = m.expand_as(a)
+
+    curr_h, curr_w = m.shape[2], m.shape[3]
+    if curr_h > target_h or curr_w > target_w:
+        start_h = (curr_h - target_h) // 2
+        start_w = (curr_w - target_w) // 2
+        m = m[:, :, start_h:start_h + target_h, start_w:start_w + target_w]
+    m = m.clamp(0.0, 1.0)
 
     # (B,1,H,W) → (B,H,W,1)
     m = m.permute(0, 2, 3, 1)
@@ -215,11 +228,11 @@ def resize_keep_ratio(img, target_w=None, target_h=None, resize_set="NEAREST"):
     interpolation = interp_map.get(resize_set, InterpolationMode.NEAREST)
 
     _, h, w, c = img.shape
-    if target_w is not None:  # vertical 모드
+    if target_w is not None:  # vertical
         scale = target_w / w
         new_h = int(h * scale)
         new_w = target_w
-    elif target_h is not None:  # horizontal 모드
+    elif target_h is not None:  # horizontal
         scale = target_h / h
         new_w = int(w * scale)
         new_h = target_h
@@ -234,24 +247,17 @@ def apply_image_2cut(ref_canvas, image_a, image_b, mode="vertical", pad_color="#
     H, W = ref_canvas.shape[1:3]
     Ha, Wa = image_a.shape[1:3]
     Hb, Wb = image_b.shape[1:3]
-    print("apply ref_canvas.shape:", ref_canvas.shape)
-    print("apply image_a.shape:", image_a.shape)
-    print("apply image_b.shape:", image_b.shape)
 
 
     # resize
     if mode == "vertical":
         image_a = resize_keep_ratio(image_a, target_w=W-32, resize_set=resize_set)
         image_b = resize_keep_ratio(image_b, target_w=W-32, resize_set=resize_set)
-        print("apply resize image_a.shape:", image_a.shape)
-        print("apply resize image_b.shape:", image_b.shape)
         Ha, Wa = image_a.shape[1:3]
         Hb, Wb = image_b.shape[1:3]
     else:  # horizontal
         image_a = resize_keep_ratio(image_a, target_h=H-32, resize_set=resize_set)
         image_b = resize_keep_ratio(image_b, target_h=H-32, resize_set=resize_set)
-        print("apply resize image_a.shape:", image_a.shape)
-        print("apply resize image_b.shape:", image_b.shape)
         Ha, Wa = image_a.shape[1:3]
         Hb, Wb = image_b.shape[1:3]
 
@@ -273,22 +279,12 @@ def apply_image_2cut(ref_canvas, image_a, image_b, mode="vertical", pad_color="#
 
 def composite_fixed_2cut(ref_canvas, padded_a, padded_b, masks):
 
-    print(padded_a.min(), padded_a.max())
-    print(padded_b.min(), padded_b.max())
-    print("mask A shape:", masks["A"].shape)
-    print("mask B shape:", masks["B"].shape)
-    print("mask A unique:", masks["A"].unique())
-    print("mask B unique:", masks["B"].unique())
-    print("apply padded_a.shape:", padded_a.shape)
-    print("apply padded_b.shape:", padded_b.shape)
+
     
     mask_a = masks["A"].float().repeat(1,1,1,3)  # (1,H,W,3)
     mask_b = masks["B"].float().repeat(1,1,1,3)  # (1,H,W,3)
-    print("apply mask_a.shape:", mask_a.shape)
-    print("apply mask_b.shape:", mask_b.shape)
     composite_a = ref_canvas * (1 - mask_a) + padded_a * mask_a
     composite = composite_a * (1 - mask_b) + padded_b * mask_b
-    print("composite min/max:", composite.min().item(), composite.max().item())
     return composite
 
 def apply_image_3cut(ref_canvas, image_a, image_b, image_c, mode="vertical", pad_color="#FFFFFF", resize_set="NEAREST"):
@@ -315,29 +311,13 @@ def apply_image_3cut(ref_canvas, image_a, image_b, image_c, mode="vertical", pad
         return padded_a, padded_b, padded_c
 
 def composite_fixed_3cut(ref_canvas, padded_a, padded_b, padded_c, masks):
-    print(padded_a.min(), padded_a.max())
-    print(padded_b.min(), padded_b.max())
-    print(padded_c.min(), padded_c.max())
-    print("mask A shape:", masks["A"].shape)
-    print("mask B shape:", masks["B"].shape)
-    print("mask c shape:", masks["c"].shape)
-    print("mask A unique:", masks["A"].unique())
-    print("mask B unique:", masks["B"].unique())
-    print("mask c unique:", masks["c"].unique())
-    print("apply padded_a.shape:", padded_a.shape)
-    print("apply padded_b.shape:", padded_b.shape)
-    print("apply padded_c.shape:", padded_c.shape)
     mask_a = masks["A"].float().repeat(1, 1, 1, 3)
     mask_b = masks["B"].float().repeat(1, 1, 1, 3)
     mask_c = masks["C"].float().repeat(1, 1, 1, 3)
-    print("apply mask_a.shape:", mask_a.shape)
-    print("apply mask_b.shape:", mask_b.shape)
-    print("apply mask_c.shape:", mask_c.shape)
     
     composite_a = ref_canvas * (1 - mask_a) + padded_a * mask_a
     composite_b = composite_a * (1 - mask_b) + padded_b * mask_b
     composite = composite_b * (1 - mask_c) + padded_c * mask_c
-    print("composite min/max:", composite.min().item(), composite.max().item())
     return composite
 
 
@@ -599,6 +579,64 @@ class IRL_Imagecomposite(IO.ComfyNode):
             result = result * m + blended_sat_t * (1 - m)
 
         return IO.NodeOutput(result)
+
+# -------------------------------
+
+class IRL_SequentialLayerComposite(IO.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="IRL_SequentialLayerComposite",
+            display_name="순차 레이어 콤포짓 (3슬롯)",
+            description="베이스 캔버스 위에 마스크가 지정된 두 개의 레이어를 순차적으로 알파 블렌딩합니다.\n"
+                        "이 노드에 사용할 이미지와 마스크의 해상도 규격은 모두 일치해야 합니다.",
+            inputs=[
+                IO.Image.Input("base_canvas", tooltip="밑바탕이 될 1번 베이스 이미지"),
+                IO.Image.Input("layer_1", tooltip="마스크 1 영역에 얹을 2번 소스 이미지"),
+                IO.Mask.Input("mask_1", tooltip="layer_1을 적용할 1번 마스크 (필수)", optional=False),
+                IO.Image.Input("layer_2", tooltip="마스크 2 영역에 얹을 3번 소스 이미지", optional=True),
+                IO.Mask.Input("mask_2", tooltip="layer_2를 적용할 2번 마스크 (3번째 이미지를 적용하려면 필수입력)", optional=True),
+                IO.Float.Input("strength_1", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="레이어 1 합성 강도"),
+                IO.Float.Input("strength_2", default=1.0, min=0.0, max=1.0, step=0.01, tooltip="레이어 2 합성 강도"),
+                IO.Combo.Input("mask_mode", options=["normal", "Small_spread", "big_spread", "blur"], default="normal", tooltip="마스크 가공 모드"),
+            ],
+            outputs=[IO.Image.Output("image", tooltip="순차 합성된 최종 결과물")],
+            category="이미지 리파이너/합성"
+        )
+
+    @classmethod
+    def execute(cls, base_canvas, layer_1, mask_1, layer_2=None, mask_2=None, strength_1=1.0, strength_2=1.0, mask_mode="normal") -> IO.NodeOutput:
+        
+        # 1. Tensor transformation (assuming the same resolution)
+        canvas = to_torch_image(base_canvas)  # (1,H,W,3)
+        l1 = to_torch_image(layer_1)  # (1,H,W,3)
+        if canvas.shape[1:3] != l1.shape[1:3]:
+            raise ValueError("[IRL_SequentialLayerComposite Error] base_canvas와 layer_1의 해상도가 일치하지 않습니다.")
+
+        # 2. First layer compositing (Base + Layer 1 with Mask 1)
+        if mask_1 is not None:
+            mask_1 = ensure_mask_tensor(mask_1)  # (B,1,H,W)
+            if mask_1.shape[2:] != canvas.shape[1:3]:
+                raise ValueError("[IRL_SequentialLayerComposite Error] mask_1의 해상도가 base_canvas와 일치하지 않습니다.")
+            m1 = process_mask(mask_1, canvas, mask_mode)
+            m1 = m1 * max(0.0, min(1.0, strength_1))
+            # Alpha blending operation: Canvas * (1 - m1) + Layer1 * m1
+            canvas = canvas * (1.0 - m1) + l1 * m1
+
+        # 3. Second layer compositing (Updated Canvas + Layer 2 with Mask 2)
+        if mask_2 is not None:
+            mask_2 = ensure_mask_tensor(mask_2)  # (B,1,H,W)
+            if mask_2.shape[2:] != canvas.shape[1:3]:
+                raise ValueError("[IRL_SequentialLayerComposite Error] mask_2의 해상도가 base_canvas와 일치하지 않습니다.")
+            l2 = to_torch_image(layer_2)
+            if canvas.shape[1:3] != l2.shape[1:3]:
+                raise ValueError("[IRL_SequentialLayerComposite Error] base_canvas와 layer_2의 해상도가 일치하지 않습니다.")
+            m2 = process_mask(mask_2, canvas, mask_mode)
+            m2 = m2 * max(0.0, min(1.0, strength_2))
+            # Alpha blending operation: Canvas * (1 - m2) + Layer2 * m2
+            canvas = canvas * (1.0 - m2) + l2 * m2
+
+        return IO.NodeOutput(canvas)
 
 # -------------------------------
 
@@ -1139,6 +1177,7 @@ class IRL_ImagecutCompositeCustom(IO.ComfyNode):
  
 COMPOSITE_NODE_CLASS_MAPPINGS = {
     "IRL_Imagecomposite": IRL_Imagecomposite,
+    "IRL_SequentialLayerComposite": IRL_SequentialLayerComposite,
     "IRL_Imagecutcomposite": IRL_Imagecutcomposite,
     "IRL_Image3cutcomposite": IRL_Image3cutcomposite,
     "IRL_Image4cutcomposite": IRL_Image4cutcomposite,
@@ -1150,6 +1189,7 @@ COMPOSITE_NODE_CLASS_MAPPINGS = {
 
 COMPOSITE_NODE_DISPLAY_NAME_MAPPINGS = {
     "IRL_Imagecomposite": "이미지 합성(통합)",
+    "IRL_SequentialLayerComposite": "순차 레이어 콤포짓 (3슬롯)",
     "IRL_Imagecutcomposite": "이미지 컷 레이아웃(2컷)",
     "IRL_Image3cutcomposite": "이미지 컷 레이아웃(3컷)",
     "IRL_Image4cutcomposite": "이미지 컷 레이아웃(4컷)",
