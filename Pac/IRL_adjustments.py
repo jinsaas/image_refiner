@@ -201,7 +201,7 @@ class IRL_GradientMap(IO.ComfyNode):
                 IO.Combo.Input("black", options=["off", "on"], default="off", tooltip="흑색 팔레트 설정"),
                 IO.Int.Input("color_str", default=0, min=0, max=255, step=1,
                                tooltip="팔레트 색상 강조 강도 (값이 클수록 팔레트 색상이 더 강하게 적용됨)"),
-                IO.Combo.Input("base_suf", options=["off", "on"], default="off", tooltip="원본 색상 유지 여부"),
+                IO.Combo.Input("base_suf", options=["off", "on"], default="on", tooltip="원본 색상 유지 여부"),
                 IO.Combo.Input("blend_mode", options=["off", "soft_blend", "blend", "hard_blend"], default="off", tooltip="다중 활성 팔레트 색상 블렌딩 모드"),
                 IO.Float.Input("gradient_str", default=0.0, min=0.0, max=1.0, step=0.01, tooltip="밝기 기반 그라디언트 조정"),
                 IO.Combo.Input("auto_gradient", options=["off", "on"], default="off", tooltip="다중 활성 팔레트를 자동 보간하여 그라디언트 생성")
@@ -214,7 +214,7 @@ class IRL_GradientMap(IO.ComfyNode):
 
     @classmethod
     def execute(cls, image, red="off", magenta="off", yellow="off", green="off", blue="off", cyan="off", black="off",
-                color_str=0, base_suf="off", gradient_str=0.0, blend_mode="off", auto_gradient="off") -> IO.NodeOutput:
+                color_str=0, base_suf="on", gradient_str=0.0, blend_mode="off", auto_gradient="off") -> IO.NodeOutput:
 
         arr = to_numpy_image(image).astype(np.float32)
         if arr.max() <= 1.0:
@@ -288,13 +288,6 @@ class IRL_GradientMap(IO.ComfyNode):
 
         mapped = np.clip(mapped, 0, 255).astype(np.uint8)
         return IO.NodeOutput(to_tensor_output(Image.fromarray(mapped)))
-
-
-
-
-
-
-
 
 
 # -------------------------------
