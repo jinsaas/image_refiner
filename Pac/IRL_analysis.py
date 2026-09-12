@@ -406,8 +406,8 @@ class IRL_CustomDepthlikeMapGenerator(IO.ComfyNode):
 
         if edge_fill:
             for idx, (vx, vy) in enumerate(valid_coords):
-                cv2.drawMarker(guide_canvas, (vx, vy), (0, 0, 255), markerType=cv2.MARKER_CROSS, markerSize=15, thickness=2)
-                cv2.putText(guide_canvas, f"W{idx+1}({vx},{vy})", (vx + 5, vy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
+                cv2.drawMarker(guide_canvas, (vx, vy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=15, thickness=2)
+                cv2.putText(guide_canvas, f"W{idx+1}({vx},{vy})", (vx + 5, vy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 0, 0), 1)
 
         # 4 Create Depth Map
         # 4-1. Distance Transform
