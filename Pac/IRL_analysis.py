@@ -266,17 +266,18 @@ class IRL_CustomDepthlikeMapGenerator(IO.ComfyNode):
             node_id="IRL_CustomDepthlikeMapGenerator",
             display_name="커스텀 유사 뎁스 맵 생성기",
             description="엣지 맵과 거리 변환을 활용해 입체적인 간이 뎁스 맵을 생성합니다.\n"
-                        "워터셰드 옵션을 켜면, 뎁스 맵을 근거로 서로 붙어있는 영역을 분리한 마스크도 함께 출력합니다.",
+                        "워터셰드 옵션을 켜면, 뎁스 맵을 근거로 서로 붙어있는 영역을 분리한 마스크도 함께 출력합니다.\n"
+                        "엣지 필을 통해 구멍이 뚫린 엣지를 보강할 수 있으며, 엣지 필 도트포인트의 크기는 '각 변의 최소크기*0.01'입니다.",
             inputs=[
                 IO.Image.Input("image", tooltip="대상 이미지"),
                 IO.Float.Input("threshold", default=50.0, min=0.0, max=255.0, step=1.0, tooltip="엣지 이진화 임계값"),
                 IO.Boolean.Input("blur_enabled", default=False, tooltip="블러 처리 여부(고주파 잔선을 지우고 굵은 구조만 남깁니다)"),
                 IO.Int.Input("morph_kernel", default=3, min=1, max=11, step=2, tooltip="끊어진 선을 이어주는 닫기(Closing) 연산 커널 크기"),
-                IO.String.Input("edge_fill_coords", default="", tooltip="벽을 세울 좌표들. 예: (205, 260), (150, 300)"),
+                IO.String.Input("edge_fill_coords", default="", multiline=True, tooltip="벽을 세울 좌표들. 예: (205, 260), (150, 300)"),
                 IO.Boolean.Input("invert_target", default=False, tooltip="꺼짐(기본): 영역 내부가 기준 → 중심이 밝고 경계로 갈수록 어두워짐(일반적인 뎁스 형태).\n"
                                                                     "켜짐: 엣지선이 기준 → 선 자체를 강조하는 형태로 반전됩니다."),
                 IO.Boolean.Input("enable_watershed", default=False, tooltip="뎁스 맵의 국소 최댓값을 각 영역의 중심 씨앗으로 삼아, 붙어있는 영역들을 자동으로 나눕니다."),
-                IO.Boolean.Input("edge_fill", default=False, tooltip="켜짐: 지정한 좌표(seed_x, y)를 기준으로 도트 찍기 동작\n꺼짐: 기본 엣지/실루엣 정보 그대로 사용"),
+                IO.Boolean.Input("edge_fill", default=False, tooltip="켜짐: 지정한 좌표(seed_x, y)를 기준으로 도트 찍기 동작.\n꺼짐: 기본 엣지/실루엣 정보 그대로 사용"),
                 IO.Int.Input("min_marker_distance", default=40, min=1, max=200, step=1, tooltip="영역 중심으로 인식할 최소 간격 (enable_watershed 켰을 때만 작동)"),
                 IO.Boolean.Input("preview_guide", default=True, tooltip="True면 가이드 프리뷰 출력, False면 일반 뎁스 출력"),
                 IO.Float.Input("overwrite_gray", default=0.0, min=0.0, max=0.5, step=0.1, tooltip="0.1 이상인 경우 엣지정보에 그레이스케일을 포함, 0.0이면 일반 엣지로 출력"),
@@ -388,6 +389,16 @@ class IRL_CustomDepthlikeMapGenerator(IO.ComfyNode):
                     pass
 
         # --- Solid Silhouette Generation ---
+
+        if edge_fill:
+            for vx, vy in valid_coords:
+                cv2.circle(thick_edges, (vx, vy), radius=max(3, min(H, W) // 100), color=255, thickness=-1)
+
+        if edge_fill:
+            for idx, (vx, vy) in enumerate(valid_coords):
+                cv2.drawMarker(guide_canvas, (vx, vy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=15, thickness=2)
+                cv2.putText(guide_canvas, f"W{idx+1}({vx},{vy})", (vx + 5, vy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 0, 0), 1)
+
         padded_edges = cv2.copyMakeBorder(thick_edges, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
         padded_H, padded_W = padded_edges.shape[:2]
         
@@ -400,14 +411,6 @@ class IRL_CustomDepthlikeMapGenerator(IO.ComfyNode):
         base_silhouette = base_silhouette_padded[1:1+H, 1:1+W]
 
         processed_silhouette = base_silhouette.copy()
-        if edge_fill:
-            for vx, vy in valid_coords:
-                cv2.circle(base_silhouette, (vx, vy), radius=max(3, min(H, W) // 100), color=0, thickness=-1)
-
-        if edge_fill:
-            for idx, (vx, vy) in enumerate(valid_coords):
-                cv2.drawMarker(guide_canvas, (vx, vy), (255, 0, 0), markerType=cv2.MARKER_CROSS, markerSize=15, thickness=2)
-                cv2.putText(guide_canvas, f"W{idx+1}({vx},{vy})", (vx + 5, vy - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 0, 0), 1)
 
         # 4 Create Depth Map
         # 4-1. Distance Transform
