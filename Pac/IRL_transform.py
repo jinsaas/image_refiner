@@ -68,7 +68,7 @@ def ensure_image_tensor(arr):
 def image_to_vector(image_arr, threshold=127):
     gray = cv2.cvtColor(image_arr, cv2.COLOR_RGB2GRAY)
     _, thresh = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
     return contours
 
 def resize_vector(contours, new_width, new_height, orig_width, orig_height):
@@ -78,26 +78,61 @@ def resize_vector(contours, new_width, new_height, orig_width, orig_height):
     for cnt in contours:
         if cnt.shape[0] > 0:
             scaled = cnt.astype(np.float32) * [scale_x, scale_y]
-            scaled = scaled.astype(np.int32)
-            scaled_contours.append(scaled)
+            scaled_int = np.round(scaled).astype(np.int32)
+            reshaped = scaled_int.reshape(-1, 2)
+            unique_pts = np.unique(reshaped, axis=0)
+            
+            if len(unique_pts) > 0:
+                final_cnt = unique_pts.reshape(-1, 1, 2)
+                scaled_contours.append(final_cnt)
     return scaled_contours
 
-def vector_to_image(contours, width, height, base_image=None, draw_color=(0,0,0), thickness=1, interpolation=cv2.INTER_LANCZOS4, lineType=cv2.LINE_AA, contour_blur=None):
+def vector_to_image(contours, width, height, base_image=None, draw_color=(0,0,0), thickness=1, interpolation=cv2.INTER_LANCZOS4, lineType=cv2.LINE_AA, contour_blur=False):
     if base_image is None:
         canvas = np.zeros((height, width, 3), dtype=np.uint8)
     elif base_image.shape[:2] == (height, width):
         canvas = base_image.copy()          # If the size already matches, skip resizing
     else:
-        canvas = cv2.resize(base_image, (width, height), interpolation=cv2.INTER_LANCZOS4)
+        canvas = cv2.resize(base_image, (width, height), interpolation=interpolation)
+        
     valid_contours = [cnt for cnt in contours if cnt is not None and len(cnt) > 0]
-    if valid_contours:
-        cv2.drawContours(canvas, valid_contours, -1, draw_color, thickness, lineType=lineType)
-    else:
-        print(f"Since contour traversal failed, a normal resized image is returned.")
-        pass
 
-    if contour_blur:
-            canvas = cv2.GaussianBlur(canvas, (3, 3), 0.5)
+    if valid_contours:
+        # 1. Create an RGBA (4-channel) layer starting as transparent (Alpha=0)
+        # (Even if black lines are drawn, they are distinguished by the alpha value, so no conflict occurs)
+        contour_layer = np.zeros((height, width, 4), dtype=np.uint8)
+        
+        # Apply opacity (Alpha = 255) to the drawing color.
+        color_rgba = tuple(list(draw_color) + [255]) if len(draw_color) == 3 else draw_color
+        cv2.drawContours(contour_layer, valid_contours, -1, color_rgba, thickness, lineType=lineType)
+
+        # 2. Apply Gaussian blur to the entire RGBA layer (smoothing both the RGB and alpha channels simultaneously)
+        if contour_blur:
+            contour_layer = cv2.GaussianBlur(contour_layer, (3, 3), 0.5)
+
+        # 3. Perform Alpha Blending (Alpha Compositing)
+        alpha = contour_layer[:, :, 3].astype(np.float32) / 255.0 # (H, W)
+        alpha = np.expand_dims(alpha, axis=2)                     # (H, W, 1)
+        alpha = np.repeat(alpha, 3, axis=2)                       # (H, W, 3)
+
+        # Prepare the base canvas in safe 3-channel RGB
+        if canvas.ndim == 2:
+            canvas = cv2.cvtColor(canvas, cv2.COLOR_GRAY2RGB)
+        elif canvas.shape[2] == 4:
+            canvas = cv2.cvtColor(canvas, cv2.COLOR_RGBA2RGB)
+
+        canvas_float = canvas.astype(np.float32)
+        layer_float = contour_layer[:, :, :3].astype(np.float32)
+
+        canvas_float = np.clip(layer_float * alpha + canvas_float, 0, 255)
+        canvas = canvas_float.astype(np.uint8)
+
+    else:
+        print("\033[93m[IRL_VecterResize Warning] Contour traversal failed, falling back to pixel resize.\033[0m")
+        if canvas.ndim == 2:
+            canvas = cv2.cvtColor(canvas, cv2.COLOR_GRAY2RGB)
+        elif canvas.shape[2] == 4:
+            canvas = cv2.cvtColor(canvas, cv2.COLOR_RGBA2RGB)
 
     return canvas
 
@@ -134,6 +169,7 @@ class IRL_Resize(IO.ComfyNode):
                 IO.Image.Input("image", tooltip="리사이즈할 이미지"),
                 IO.Int.Input("width", default=256, min=64, max=2048, tooltip="출력 이미지의 너비"),
                 IO.Int.Input("height", default=256, min=64, max=2048, tooltip="출력 이미지의 높이"),
+                IO.Combo.Input("method", default="Bicubic", options=["Lanczos","Bicubic","Nearest","PixelBox"], tooltip="보간용 처리법"),
             ],
             outputs=[
                 IO.Image.Output("image", tooltip="리사이즈된 이미지"),
@@ -142,7 +178,7 @@ class IRL_Resize(IO.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image, width, height) -> IO.NodeOutput:
+    def execute(cls, image, width, height, method) -> IO.NodeOutput:
         total_steps = 3
         pbar = progressbar_to_base(total_steps)
         arr = to_numpy_image(image)
@@ -153,7 +189,9 @@ class IRL_Resize(IO.ComfyNode):
         height = min(max(height, 64), 2048)
 
         pbar.update(1)
-        resized = pil_img.resize((width, height), Image.LANCZOS)
+        pil_interp_map = {"Bicubic": Image.BICUBIC, "Lanczos": Image.LANCZOS, "Nearest": Image.NEAREST, "PixelBox": Image.BOX}
+        # 1. pixel resizing
+        resized = pil_img.resize((width, height),  resample=pil_interp_map[method])
         pbar.update(1)
         canvas = to_tensor_output(resized)
         return IO.NodeOutput(canvas)
@@ -559,10 +597,10 @@ class IRL_CropMargins(IO.ComfyNode):
 
         # Validation
         if (left + right) >= w:
-            raise ValueError(f"[IRL_CropMargins Error] 좌우 크롭 값(left: {left}, right: {right}) 합이 (Width:{w})이상입니다. 유효한 크롭 영역이 없습니다.")
+            raise ValueError(f"[IRL_CropMargins Error] The sum of the left and right crop values ​​(left: {left}, right: {right}) is greater than or equal to the width (Width: {w}). There is no valid crop area.")
 
         if (top + bottom) >= h:
-            raise ValueError(f"[IRL_CropMargins Error] 상하 크롭 값(top: {top}, bottom: {bottom}) 합이 (Height:{h})이상입니다. 유효한 크롭 영역이 없습니다.")
+            raise ValueError(f"[IRL_CropMargins Error] The sum of the top and bottom crop values ​​(top: {top}, bottom: {bottom}) is greater than or equal to the height (Height: {h}). There is no valid crop area.")
         
         base_left = cx   # The default maximum distance to be applied when equal
         base_right = w - cx
@@ -574,7 +612,7 @@ class IRL_CropMargins(IO.ComfyNode):
         h_bottom = base_bottom - bottom
 
         if w_left + w_right > w:
-            print(f"[IRL_CropMargins] Warning: The sum of left({left}) + right({right}) is already greater than the image width ({w}). Adjust the crop area.")
+            print(f"[IRL_CropMargins] Warning: The sum of left-right({left}) + right({right}) is already greater than the image width ({w}). Adjust the crop area.")
             # A safety mechanism to reduce to the appropriate ratio or to leave only the minimal area (1 pixel) visible
             scale = (w - 1) / (w_left + w_right) if (w_left + w_right) > 0 else 1
             wi_left = int(w_left * scale)
