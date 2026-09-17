@@ -243,7 +243,8 @@ def resize_keep_ratio(img, target_w=None, target_h=None, resize_set="NEAREST"):
     return img.permute(0,2,3,1)
 
 def apply_image_2cut(ref_canvas, image_a, image_b, mode="vertical", pad_color="#FFFFFF", resize_set="NEAREST"):
-    
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     H, W = ref_canvas.shape[1:3]
     Ha, Wa = image_a.shape[1:3]
     Hb, Wb = image_b.shape[1:3]
@@ -278,9 +279,8 @@ def apply_image_2cut(ref_canvas, image_a, image_b, mode="vertical", pad_color="#
         return ref_canvas
 
 def composite_fixed_2cut(ref_canvas, padded_a, padded_b, masks):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
 
-
-    
     mask_a = masks["A"].float().repeat(1,1,1,3)  # (1,H,W,3)
     mask_b = masks["B"].float().repeat(1,1,1,3)  # (1,H,W,3)
     composite_a = ref_canvas * (1 - mask_a) + padded_a * mask_a
@@ -288,6 +288,8 @@ def composite_fixed_2cut(ref_canvas, padded_a, padded_b, masks):
     return composite
 
 def apply_image_3cut(ref_canvas, image_a, image_b, image_c, mode="vertical", pad_color="#FFFFFF", resize_set="NEAREST"):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     H, W = ref_canvas.shape[1:3]
 
     if mode == "vertical":
@@ -311,6 +313,8 @@ def apply_image_3cut(ref_canvas, image_a, image_b, image_c, mode="vertical", pad
         return padded_a, padded_b, padded_c
 
 def composite_fixed_3cut(ref_canvas, padded_a, padded_b, padded_c, masks):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     mask_a = masks["A"].float().repeat(1, 1, 1, 3)
     mask_b = masks["B"].float().repeat(1, 1, 1, 3)
     mask_c = masks["C"].float().repeat(1, 1, 1, 3)
@@ -322,6 +326,8 @@ def composite_fixed_3cut(ref_canvas, padded_a, padded_b, padded_c, masks):
 
 
 def apply_image_4cut(ref_canvas, image_a, image_b, image_c, image_d, mode="vertical", pad_color="#FFFFFF", resize_set="NEAREST"):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     H, W = ref_canvas.shape[1:3]
     
     if mode == "vertical":
@@ -343,6 +349,8 @@ def apply_image_4cut(ref_canvas, image_a, image_b, image_c, image_d, mode="verti
     return padded_a, padded_b, padded_c, padded_d
 
 def composite_fixed_4cut(ref_canvas, padded_a, padded_b, padded_c, padded_d, masks):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     mask_a = masks["A"].float().repeat(1, 1, 1, 3)
     mask_b = masks["B"].float().repeat(1, 1, 1, 3)
     mask_c = masks["C"].float().repeat(1, 1, 1, 3)
@@ -355,6 +363,8 @@ def composite_fixed_4cut(ref_canvas, padded_a, padded_b, padded_c, padded_d, mas
     return composite
 
 def apply_image_5cut(ref_canvas, image_a, image_b, image_c, image_d, image_e, mode="vertical", pad_color="#FFFFFF", resize_set="NEAREST"):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     H, W = ref_canvas.shape[1:3]
     
     imgs = [image_a, image_b, image_c, image_d, image_e]
@@ -369,6 +379,8 @@ def apply_image_5cut(ref_canvas, image_a, image_b, image_c, image_d, image_e, mo
     return tuple(padded)
 
 def composite_fixed_5cut(ref_canvas, padded_a, padded_b, padded_c, padded_d, padded_e, masks):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     mask_a = masks["A"].float().repeat(1, 1, 1, 3)
     mask_b = masks["B"].float().repeat(1, 1, 1, 3)
     mask_c = masks["C"].float().repeat(1, 1, 1, 3)
@@ -383,6 +395,8 @@ def composite_fixed_5cut(ref_canvas, padded_a, padded_b, padded_c, padded_d, pad
     return composite
 
 def apply_image_6cut(ref_canvas, image_a, image_b, image_c, image_d, image_e, image_f, mode="vertical", pad_color="#FFFFFF", resize_set="NEAREST"):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     H, W = ref_canvas.shape[1:3]
     
     imgs = [image_a, image_b, image_c, image_d, image_e, image_f]
@@ -397,6 +411,8 @@ def apply_image_6cut(ref_canvas, image_a, image_b, image_c, image_d, image_e, im
     return tuple(padded)
 
 def composite_fixed_6cut(ref_canvas, padded_a, padded_b, padded_c, padded_d, padded_e, padded_f, masks):
+# Dedicated fixed-padding function group. Removed from the applied functions due to poor efficiency.
+
     keys = ["A", "B", "C", "D", "E", "F"]
     paddings = [padded_a, padded_b, padded_c, padded_d, padded_e, padded_f]
     
@@ -407,6 +423,7 @@ def composite_fixed_6cut(ref_canvas, padded_a, padded_b, padded_c, padded_d, pad
             composite = composite * (1 - m) + pad_img * m
     return composite
 
+# Update Logic.
 def image_to_vector(image_arr):
     gray = cv2.cvtColor(image_arr, cv2.COLOR_RGB2GRAY)
     contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -485,7 +502,7 @@ def composite_dynamic_cuts(working_canvas, slot_masks, slot_images):
 
         if box_w > orig_w or box_h > orig_h:
             processed_np = cv_resize_upsize(img_np, box_w, box_h, method="LANCZOS")
-        elif box_w < orig_w or box_h < orig_w:
+        elif box_w < orig_w or box_h < orig_h:
             processed_np = cv_resize_downsize(img_np, box_w, box_h, method="PIXELBOX")
         else:
             processed_np = img_np
