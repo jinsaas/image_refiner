@@ -702,6 +702,14 @@ def apply_edge_filter(img, strength):
     sigma_r = base_sigma_r + (0.01 * offset)
     return cv2.edgePreservingFilter(img, flags=1, sigma_s=sigma_s, sigma_r=sigma_r)
 
+def apply_unsharp_mask(img, amount: float):
+    amount = float(np.clip(amount, 0.000, 2.000))
+    if amount == 0.0:
+        return img
+    blurred = cv2.GaussianBlur(img, (0, 0), sigmaX=1.5)
+    sharpened = cv2.addWeighted(img, 1.0 + amount, blurred, -amount, 0)
+    return np.clip(sharpened, 0, 255).astype(np.uint8)
+
 def match_latent_size(tensor, target_shape):
     if tensor.ndim == 4:  # (B,C,H,W)
         if tensor.shape[2:] != target_shape:
@@ -2386,60 +2394,66 @@ class IRL_ResamplerInpaint(IO.ComfyNode):
 
 #----------------------------------------
 
-
 class IRL_rescaler(IO.ComfyNode):
+    @classmethod
+    def run_quantize(cls, img, color_palette, quantize_method):
+        if color_palette > 0:
+            n_colors = int(color_palette)
+            if quantize_method == "kmeans":
+                pixels = img.reshape(-1, 3).astype(np.float32)
+                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
+                _, labels, centers = cv2.kmeans(pixels, n_colors, None, criteria, 5, cv2.KMEANS_RANDOM_CENTERS)
+                centers = np.uint8(centers)
+                img = centers[labels.flatten()].reshape(img.shape)
+            elif quantize_method == "median_cut":
+                pil_img = Image.fromarray(img)
+                pil_img = pil_img.quantize(colors=n_colors, method=Image.MEDIANCUT)
+                img = np.array(pil_img.convert("RGB"))
+        return img
+
+    @classmethod
+    def run_enhance(cls, img, detail_str, edge_str, unsharp_strength):
+        img = apply_detail_enhance(img, detail_str)
+        img = apply_edge_filter(img, edge_str)
+        img = apply_unsharp_mask(img, unsharp_strength)
+        return img
+
     @classmethod
     def define_schema(cls):
         return IO.Schema(
             node_id="IRL_rescaler",
             display_name="리스케일러",
             category="이미지 리파이너/인페인팅",
-            description="다운스케일 후 리스케일을 시도해서 위화감을 줄여보려는 실험 노드.\n"
-                        "입력되는 이미지의 높이/폭은 짝수여야 합니다.",
+            description="업스케일→다운스케일→업스케일→양자화→보정 파이프라인으로 유사 픽셀아트 효과를 생성합니다.",
             inputs=[
-                IO.Image.Input("image", tooltip="대상 이미지"),
-                IO.UpscaleModel.Input("upscale_model", tooltip="참고 업스케일 모델", optional=True),
-                IO.Combo.Input("tile_str", options=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"],
-                               default="0", tooltip="타일링 처리 설정.수치가 높을수록 처리강도가 낮아지고  블러처리가 늘어납니다."),
-                IO.Combo.Input("overlap_str", options=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
-                               default="0", tooltip="겹침 처리 설정.수치가 높을수록 처리강도가 낮아지고 블러처리가 늘어납니다."),
-                IO.Combo.Input("rescale_mode", options=["off", "resize", "upscalemodel"], default="resize",
-                               tooltip="출력 스케일 처리 방식: off=리사이즈 안함, resize=기본 보간, upscalemodel=업스케일 모델 사용(업스케일 모델 사용시는 디테일강도, 엣지필터강도는 적용되지 않습니다."),
-                IO.Combo.Input("downscale_filter", options=["off", "bilinear", "pixelbox", "vectorimage"], default="off",
-                                tooltip="다운스케일 보간 시 사용할 보간 방법. 보간 필터: bilinear=Bilinear, pixelbox=INTER_AREA, nearest=Vectorimage"),
-                IO.Combo.Input("rescale_filter", options=["off", "nearest", "cubic", "lanczos"], default="off",
-                                tooltip="스케일 보간 시 사용할 보간 방법. 모델이 있을땐 작동하지 않습니다. 보간 필터: cubic=INTER_CUBIC, lanczos=INTER_LANCZOS4, nearest=INTER_NEAREST"),
-                IO.Combo.Input("detail_str", options=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
-                               default="6", tooltip="디테일 강도 처리 설정.수치가 높을수록 처리강도가 낮아지고  블러처리가 늘어납니다. 모델이 있을땐 작동하지 않습니다."),
-                IO.Combo.Input("edgeFilter_str", options=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
-                               default="6", tooltip="엣지필터 처리 설정.수치가 높을수록 처리강도가 낮아지고  블러처리가 늘어납니다. 모델이 있을땐 작동하지 않습니다."),
-                IO.Combo.Input("resize_factor", options=["0", "1", "2", "3", "4"], default="0", tooltip="출력 크기 조정: 0=조정 없음, 1=2배, 2=4배, 3=6배, 4=8배"),
-                IO.Combo.Input("device_set", options=["cpu", "nvidia", "amd"], default="cpu", tooltip="실행 장치"),
-                IO.Boolean.Input("clear_cache", default=False, tooltip="켰을 시 캐시를 정리합니다."),
+                IO.Image.Input("image"),
+                # 1. Pre-upscale
+                IO.Combo.Input("pre_upscale", options=["skip", "bilinear", "lanczos", "nearest"], default="skip", tooltip="1단계: 사전 업스케일 보간 방식"),
+                # 2. Downscale (area fixed)
+                IO.Combo.Input("downscale_factor", options=["2", "4", "8","16","32"], default="4", tooltip="2단계: 에어리어 다운스케일 강도. 높을수록 픽셀이 굵어짐"),
+                # 3. Upscale
+                IO.Combo.Input("upscale_filter", options=["nearest", "bilinear", "lanczos"], default="nearest", tooltip="3단계: 업스케일 보간. nearest=픽셀계단 강조"),
+                IO.Combo.Input("upscale_target", options=["original", "2x", "4x"], default="original", tooltip="3단계: 출력 크기 기준"),
+                IO.Boolean.Input("end_set_switch", default=False, tooltip="스위치를 킬 경우 보정을 하고 난 뒤 양자화를 진행합니다."),
+                # 4. Quantization
+                IO.Int.Input("color_palette", default=256, min=0, max=256, step=1, tooltip="4단계: 색상 팔레트 수. 낮을수록 레트로 느낌, 0일 경우는 양자화 스킵"),
+                IO.Combo.Input("quantize_method", options=["kmeans", "median_cut"], default="kmeans", tooltip="양자화 알고리즘"),
+                # 5. Correction
+                IO.Combo.Input("detail_str", options=["1","2","3","4","5","6","7","8","9","10","11"], default="6", tooltip="5단계: 디테일 강도"),
+                IO.Combo.Input("edge_str", options=["1","2","3","4","5","6","7","8","9","10","11"], default="6", tooltip="5단계: 엣지 강도"),
+				IO.Float.Input("unsharp_strength", default=0.500, min=0.000, max=2.000, step=0.001, tooltip="5단계: 언샤프 마스크 강도 (0.000 ~ 2.000)"),
+                IO.Combo.Input("device_set", options=["cpu", "nvidia", "amd"], default="cpu"),
+                IO.Boolean.Input("clear_cache", default=False),
             ],
             outputs=[IO.Image.Output("image")]
         )
+
     @classmethod
-    def execute(cls, image, upscale_model=None, method="telea", tile_str="0", overlap_str="0", rescale_mode="off", downscale_filter="off", 
-                rescale_filter="off", detail_str="6", edgeFilter_str="6", resize_factor="0", device_set="cpu", clear_cache=False) -> IO.NodeOutput:
+    def execute(cls, image, pre_upscale="skip", downscale_factor="4", upscale_filter="nearest", upscale_target="original", color_palette=256,
+                end_set_switch=False, quantize_method="kmeans", detail_str="6", edge_str="6", unsharp_strength=0.500, device_set="cpu", clear_cache=False) -> IO.NodeOutput:
 
-                    
-        # --- Select Device --- 
-
-        if device_set == "cpu":
-            device = "cpu"
-        elif device_set == "nvidia":
+        if device_set == "nvidia" or (device_set == "amd" and torch.cuda.is_available() and torch.version.hip):
             device = "cuda"
-        elif device_set == "amd":
-            if torch.cuda.is_available() and torch.version.hip:
-                props = torch.cuda.get_device_properties(0)
-                arch = getattr(props, "gcnArchName", "")
-                print("AMD arch:", arch, "ROCm version:", torch.version.hip)
-
-                device = "cuda"
-            else:
-                print("[Warning] The AMD option was selected, but the ROCm (PyTorch HIP) environment is unavailable or does not support CUDA. Switching to CPU for safety.")
-                device = "cpu"
         else:
             device = "cpu"
 
@@ -2447,76 +2461,83 @@ class IRL_rescaler(IO.ComfyNode):
             if device == "cuda":
                 try:
                     torch.cuda.empty_cache()
-                    print("GPU cache initialization complete.")
-                except Exception as e:
-                    print("GPU cache initialization failed:", e)
-            elif device == "cpu":
-                print("CPU mode: Skip GPU cache initialization")
-
+                except Exception:
+                    pass
             gc.collect()
-            print("CPU cache initialization complete")
 
-        # --- Image to numpy ---
+        # numpy
         arr = ensure_image_tensor(image)
-        H, W = arr.shape[2:]
-        arr = arr[0].permute(1,2,0).cpu().numpy()
-        arr = (arr * 255).clip(0,255).astype(np.uint8)
+        H, W = arr.shape[2], arr.shape[3]
+        arr = arr[0].permute(1, 2, 0).cpu().numpy()
+        arr = (arr * 255).clip(0, 255).astype(np.uint8)
 
-        # downscale
+        # --- 1. Pre-upscale ---
+        if pre_upscale != "skip":
+            factor = 2
+            interp = {
+                "bilinear": cv2.INTER_LINEAR,
+                "lanczos": cv2.INTER_LANCZOS4,
+                "nearest": cv2.INTER_NEAREST,
+            }[pre_upscale]
 
-        small_H, small_W = max(64, H // 2), max(64, W // 2)
-        if downscale_filter == "off":
-            arr_small = arr.copy()
+            # Minimum size adjustment: upscale to 512 if below 256px
+            min_size = 256
+            if H < min_size or W < min_size:
+                target_size = 512 if max(H, W) < 512 else 1024
+                arr = cv2.resize(arr, (target_size, target_size), interpolation=interp)
+                H, W = target_size, target_size
 
-        elif downscale_filter == "bilinear":
-            arr_small = cv2.resize(arr, (small_W, small_H), interpolation=cv2.INTER_LINEAR)
+            # Square upscale by long axis
+            if H != W:
+                max_side = max(H, W)
+                arr = cv2.resize(arr, (max_side * factor, max_side * factor), interpolation=interp)
+            else:
+                arr = cv2.resize(arr, (W * factor, H * factor), interpolation=interp)
 
-        elif downscale_filter == "pixelbox":
-            arr_small = cv2.resize(arr, (small_W, small_H), interpolation=cv2.INTER_AREA)
+        pre_H, pre_W = arr.shape[:2]
 
-        elif downscale_filter == "vectorimage":
-            arr_small = run_vector_resize(arr, small_W, small_H, "pixelbox")
+        # --- 2. Downscale (area fixed) ---
+        div = int(downscale_factor)
+        down_W = max(4, pre_W // div)
+        down_H = max(4, pre_H // div)
 
-        # rescale factor
-        tile_val = int(tile_str)
-        tile_size = 1 if tile_val == 0 else tile_val * 4
-        overlap_val = int(overlap_str)
-        overlap_size = overlap_val * 2
+        # Print precautions if 256 or less
+        if down_W <= 256 or down_H <= 256:
+            print(f"\n[Notice] The downscaled image size ({down_W} x {down_H}) is 256px or less. The pixel art effect may be excessive.")
 
-        # rescale
-        if rescale_mode == "upscalemodel" and upscale_model is not None:
+        arr = cv2.resize(arr, (down_W, down_H), interpolation=cv2.INTER_AREA)
 
+        # --- 3. Upscale ---
+        interp_up = {
+            "nearest": cv2.INTER_NEAREST,
+            "bilinear": cv2.INTER_LINEAR,
+            "lanczos": cv2.INTER_LANCZOS4,
+        }[upscale_filter]
 
-            inpainted = run_upscale_with_progress(upscale_model, arr_small, tile=int(512 * tile_size), overlap=int(32 * overlap_size))
+        if upscale_target == "original":
+            out_W, out_H = W, H
+        elif upscale_target == "2x":
+            out_W, out_H = W * 2, H * 2
+        elif upscale_target == "4x":
+            out_W, out_H = W * 4, H * 4
 
-        elif rescale_mode == "resize":
-            resize_val = int(resize_factor)+1
-            if rescale_filter == "off":
-                resize_val = 1
-                inpainted = arr_small.copy()
-            interp = cv2.INTER_CUBIC if rescale_filter=="cubic" else \
-                     cv2.INTER_LANCZOS4 if rescale_filter=="lanczos" else \
-                     cv2.INTER_NEAREST
+        arr = cv2.resize(arr, (out_W, out_H), interpolation=interp_up)
 
-            target_W = small_W * resize_val
-            target_H = small_H * resize_val
-            inpainted = tiled_resize(arr_small, target_W, target_H, tile_size=int(512 * tile_size), overlap_size=int(32 * overlap_size), interp=interp)
-
-            inpainted = apply_detail_enhance(inpainted, detail_str)
-
-            inpainted = apply_edge_filter(inpainted, edgeFilter_str)
-
+        # --- 4 & 5. Quantization and correction (switch interlocking) ---
+        if end_set_switch:
+            # Switch on: Correction first ➔ Quantization later
+            arr = cls.run_enhance(arr, detail_str, edge_str, unsharp_strength)
+            arr = cls.run_quantize(arr, color_palette, quantize_method)
         else:
-            inpainted = arr
+            # Switch off: Quantization first ➔ Correction later (default)
+            arr = cls.run_quantize(arr, color_palette, quantize_method)
+            arr = cls.run_enhance(arr, detail_str, edge_str, unsharp_strength)
 
+        out_tensor = to_tensor_output(Image.fromarray(arr))
         del arr
-        del arr_small
 
-        inpaint=to_tensor_output(inpainted)
-        del inpainted
-
-        return IO.NodeOutput(inpaint)
-    
+        return IO.NodeOutput(out_tensor)
+-
 #----------------------------------------
 
 
