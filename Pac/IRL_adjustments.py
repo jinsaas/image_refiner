@@ -12,7 +12,6 @@ from PIL import Image
 from skimage import exposure
 import random
 
-
 import comfy
 from comfy_api.latest import IO, UI
 
