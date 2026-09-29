@@ -1484,8 +1484,6 @@ class IRL_DragGridSplineWarp(IO.ComfyNode):
         return IO.NodeOutput(output)
 # -------------------------------
 
-
-
 TRANSFORM_NODE_CLASS_MAPPINGS = {
     "IRL_Resize": IRL_Resize,
     "IRL_VecterResize": IRL_VecterResize,
