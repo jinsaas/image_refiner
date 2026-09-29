@@ -100,6 +100,7 @@ class IRL_RGBSplit(IO.ComfyNode):
             to_tensor_output(img_g),
             to_tensor_output(img_b)
         )
+
 # -------------------------------
 
 class IRL_HistogramPlot(IO.ComfyNode):
