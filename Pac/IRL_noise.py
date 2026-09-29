@@ -76,7 +76,8 @@ def to_numpy_image(image):
         return image.astype(np.uint8)
     else:
         raise TypeError("Unsupported image type")
-#
+
+#--------------------------------
 # Noise logics
 #--------------------------------
 def GaussianNoise(width, height, scale, seed, sigma, rng=None):
