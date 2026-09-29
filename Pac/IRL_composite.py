@@ -1011,6 +1011,55 @@ class IRL_ImagecutCompositeCustom(IO.ComfyNode):
         return IO.NodeOutput(working_canvas)
 
 # -------------------------------
+
+class IRL_ImageCutLayoutLoader(IO.ComfyNode):
+    BASE_DIR = os.path.dirname(__file__)
+    CUT_LAYOUT_DIR = os.path.join(BASE_DIR, "cut_layout")
+    VALID_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
+
+    @classmethod
+    def get_all_layouts(cls):
+        layouts = []
+        if os.path.exists(cls.CUT_LAYOUT_DIR):
+            for current_path, dirs, files in os.walk(cls.CUT_LAYOUT_DIR):
+                for f in files:
+                    if f.lower().endswith(cls.VALID_EXTENSIONS):
+                        rel_path = os.path.relpath(os.path.join(current_path, f), cls.CUT_LAYOUT_DIR)
+                        layouts.append(rel_path.replace("\\", "/"))
+        return sorted(layouts) if layouts else ["no_layout_found.png"]
+
+    @classmethod
+    def define_schema(cls):
+        files = cls.get_all_layouts()
+        return IO.Schema(
+            node_id="IRL_ImageCutLayoutLoader",
+            display_name="컷 레이아웃 로더",
+            description="cut_layout 폴더 내의 모든 레이아웃/프레퍼 결과물을 동적으로 탐색하여 캔버스로 로드합니다.",
+            inputs=[
+                IO.Combo.Input("cut_layout", options=files, default=files[0], tooltip="로드할 컷 레이아웃 파일"),
+                IO.Combo.Input("mode", options=["vertical", "horizontal"], default="vertical", tooltip="레이아웃 배치 방향 전환"),
+            ],
+            outputs=[
+                IO.Image.Output("canvas_image", tooltip="로드된 레퍼런스 캔버스 이미지"),
+            ],
+            category="이미지 리파이너/합성"
+        )
+
+    @classmethod
+    def execute(cls, cut_layout, mode="vertical") -> IO.NodeOutput:
+        ref_path = os.path.join(cls.CUT_LAYOUT_DIR, cut_layout)
+        if not os.path.exists(ref_path):
+            raise FileNotFoundError(f"Layout file not found: {ref_path}")
+        
+        img = Image.open(ref_path).convert("RGB")
+        ref_canvas = to_torch_image(img)
+
+        if mode == "horizontal":
+            ref_canvas = torch.rot90(ref_canvas, k=1, dims=(1, 2))
+
+        return IO.NodeOutput(ref_canvas)
+
+# -------------------------------
  
 COMPOSITE_NODE_CLASS_MAPPINGS = {
     "IRL_Imagecomposite": IRL_Imagecomposite,
@@ -1022,6 +1071,7 @@ COMPOSITE_NODE_CLASS_MAPPINGS = {
     "IRL_Image6cutcomposite": IRL_Image6cutcomposite,
     "IRL_ImagecutPreper": IRL_ImagecutPreper,
     "IRL_ImagecutCompositeCustom": IRL_ImagecutCompositeCustom,
+    "IRL_ImageCutLayoutLoader": IRL_ImageCutLayoutLoader,
 }
 
 COMPOSITE_NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1034,6 +1084,7 @@ COMPOSITE_NODE_DISPLAY_NAME_MAPPINGS = {
     "IRL_Image6cutcomposite": "이미지 컷 레이아웃(6컷)",
     "IRL_ImagecutPreper": "이미지 컷 프레퍼",
     "IRL_ImagecutCompositeCustom": "이미지 컷 컴포짓 커스텀",
+    "IRL_ImageCutLayoutLoader": "컷 레이아웃 로더",
 }
 
 # -------------------------------
